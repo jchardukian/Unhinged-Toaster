@@ -6,7 +6,7 @@ import { log, type Config } from '../config.js';
 import type { Store } from '../store.js';
 import { transcribe } from './captions.js';
 import { writeCopy } from './copy.js';
-import { downloadMedia, extractAudio, ffprobe, videoPhash } from './media.js';
+import { downloadMedia, extractAudio, ffprobe, mediaDuration, videoPhash } from './media.js';
 import { loadTemplate, pickMusic, renderShort } from './render.js';
 import { scoreCandidate } from './score.js';
 import { synthesiseCommentary } from './tts.js';
@@ -75,7 +75,7 @@ export async function produceCandidate(cfg: Config, store: Store, c: Candidate, 
     const analysis = await analyzeClip(src);
     const flags = (JSON.parse(c.safety_flags ?? '[]') as string[]);
     const muteSource = flags.includes('copyrighted_music');
-    const voDur = vo ? (await ffprobe(vo).catch(() => null))?.duration ?? 3 : 0;
+    const voDur = vo ? (await mediaDuration(vo)) ?? 3 : 0;
     const outroSec = commentaryMode === 'none' || template.commentary.position === 'intro' ? 0 : Math.max(template.commentary.outroSeconds, voDur + 0.5);
     const timeline = planEdit({
       sourceDuration: Math.min(probe.duration, template.limits.maxDurationSec - outroSec),

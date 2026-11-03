@@ -26,6 +26,15 @@ export async function ffprobe(file: string): Promise<Probe> {
   };
 }
 
+/** Duration of any media file (audio-only included), from the container. */
+export async function mediaDuration(file: string): Promise<number | null> {
+  try {
+    const { stdout } = await execFileP('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]);
+    const d = Number(stdout.trim());
+    return Number.isFinite(d) ? d : null;
+  } catch { return null; }
+}
+
 export function run(cmd: string, args: string[], opts: { cwd?: string; quiet?: boolean } = {}): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { cwd: opts.cwd, stdio: ['ignore', 'ignore', 'pipe'] });

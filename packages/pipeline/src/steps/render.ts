@@ -3,7 +3,7 @@ import path from 'node:path';
 import { escapeDrawtext, planEdit, wrapText, type CommentaryMode, type EditTimeline } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { assColor, buildAss, type Word } from './captions.js';
-import { ffprobe, run } from './media.js';
+import { ffprobe, mediaDuration, run } from './media.js';
 
 export interface Template {
   canvas: { width: number; height: number; fps: number };
@@ -77,7 +77,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const W = t.canvas.width, H = t.canvas.height, fps = t.canvas.fps;
   const mode: CommentaryMode = job.commentaryMode ?? 'outro_voice';
   const useVo = mode === 'outro_voice' && !!job.voPath;
-  const voDur = useVo ? (await ffprobe(job.voPath!).catch(() => null))?.duration ?? 3.0 : 0;
+  const voDur = useVo ? (await mediaDuration(job.voPath!)) ?? 3.0 : 0;
   const intro = t.commentary.position === 'intro' && mode !== 'none';
   // outro only when the commentary is placed at the end; always long enough for the whole sentence
   const outro = !intro && mode !== 'none' ? Math.max(t.commentary.outroSeconds, useVo ? voDur + 0.5 : 0) : 0;
