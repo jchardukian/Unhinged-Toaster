@@ -38,6 +38,7 @@ export function isHallucination(text: string, words: Word[]): string | null {
   const toks = t.toLowerCase().split(/\s+/).filter(Boolean);
   if (toks.length >= 4 && new Set(toks).size / toks.length < 0.35) return 'repetitive';
   if (/^(thanks? (you )?for watching|thank you|subscribe|like and subscribe|see you (in the )?next|bye[.!]*)[.!\s]*$/i.test(t)) return 'stock_phrase';
+  if (/(more videos|our channel|subscribe to|subtitles? by|amara\.org|www\.|\.com\b|copyright|all rights reserved)/i.test(t) && toks.length <= 12) return 'stock_phrase';
   const span = words[words.length - 1].end - words[0].start;
   const spoken = words.reduce((a, w) => a + Math.max(0, w.end - w.start), 0);
   if (toks.length >= 6 && span > 3 && spoken / span < 0.08) return 'implausible_timing';

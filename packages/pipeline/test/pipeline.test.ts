@@ -98,6 +98,7 @@ test('isHallucination drops Whisper artefacts and keeps real speech', () => {
   const w = (n: number) => Array.from({ length: n }, (_, i) => ({ word: 'x', start: i * 0.4, end: i * 0.4 + 0.3 }));
   assert.equal(isHallucination('ぽんぽこ ぽんぽこ ぽんぽこ ぽんぽこ', w(4)), 'non_latin_script');
   assert.equal(isHallucination('Thanks for watching!', w(3)), 'stock_phrase');
+  assert.equal(isHallucination('More videos available from our channel.', w(6)), 'stock_phrase');
   assert.equal(isHallucination('no no no no no no no no', w(8)), 'repetitive');
   assert.equal(isHallucination('Okay watch this, the dog is about to steal the pizza', w(10)), null);
 });
