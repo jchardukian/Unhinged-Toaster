@@ -75,7 +75,8 @@ export async function produceCandidate(cfg: Config, store: Store, c: Candidate, 
     const analysis = await analyzeClip(src);
     const flags = (JSON.parse(c.safety_flags ?? '[]') as string[]);
     const muteSource = flags.includes('copyrighted_music');
-    const outroSec = commentaryMode === 'none' ? 0 : template.commentary.outroSeconds;
+    const voDur = vo ? (await ffprobe(vo).catch(() => null))?.duration ?? 3 : 0;
+    const outroSec = commentaryMode === 'none' || template.commentary.position === 'intro' ? 0 : Math.max(template.commentary.outroSeconds, voDur + 0.5);
     const timeline = planEdit({
       sourceDuration: Math.min(probe.duration, template.limits.maxDurationSec - outroSec),
       peak: analysis.peak?.t ?? null,

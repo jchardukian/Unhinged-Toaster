@@ -61,9 +61,10 @@ export async function runDemo(cfg: Config, flags: Record<string, string | boolea
   const probeQ = await (await import('./steps/media.js')).ffprobe(clip);
   const tier = qualityTier(probeQ.width, probeQ.height);
   log.info(`source ${probeQ.width}x${probeQ.height} -> quality tier ${tier}${tier === 'low' ? ' (the production pipeline REJECTS this; demo continues)' : tier === 'ok' ? ' (used only when 1080p stock runs out)' : ''}`);
+  const outroReserve = t.commentary.position === 'intro' ? 0 : t.commentary.outroSeconds + 1.5;
   const timeline = planEdit({
-    sourceDuration: Math.min(analysis.duration, t.limits.maxDurationSec - t.commentary.outroSeconds), peak: analysis.peak?.t ?? null,
-    maxTotal: t.limits.maxDurationSec - t.commentary.outroSeconds, style: copy.edit_style ?? 'full', stickerText: copy.sticker ?? null, freezeText: copy.freeze_text ?? null,
+    sourceDuration: Math.min(analysis.duration, t.limits.maxDurationSec - outroReserve), peak: analysis.peak?.t ?? null,
+    maxTotal: t.limits.maxDurationSec - outroReserve, style: copy.edit_style ?? 'full', stickerText: copy.sticker ?? null, freezeText: copy.freeze_text ?? null,
     hasSpeech: realClip ? (transcript?.words.length ?? 0) >= 6 : false, // synthetic demo forces the full beat set
   });
   if (flags.commentary === 'none') { /* no outro: the planner already got maxTotal with outro included; fine for a 9 s demo */ }

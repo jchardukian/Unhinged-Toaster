@@ -11,3 +11,4 @@ out/
 .DS_Store
 assets/brand/generated/*.mp4
 assets/cache/
+work_*/
