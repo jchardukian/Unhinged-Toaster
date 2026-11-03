@@ -8,8 +8,11 @@
 | Buffer → Settings → API | – | create an API key → `BUFFER_API_KEY` |
 | OpenAI (or Anthropic) | – | `OPENAI_API_KEY` (scoring, copy, Whisper captions) |
 | ElevenLabs | – | `ELEVENLABS_API_KEY`, pick the toaster voice → `ELEVENLABS_VOICE_ID` |
-| Google Cloud console | YouTube Data API v3 | `YOUTUBE_API_KEY` (CC BY discovery) |
-| reddit.com/prefs/apps | "script" app | `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`, `REDDIT_PASSWORD` |
+| pixabay.com/api/docs | free key | `PIXABAY_API_KEY` (auto-cleared source) |
+| pexels.com/api | free key | `PEXELS_API_KEY` (auto-cleared source) |
+| Google Cloud console | YouTube Data API v3 | `YOUTUBE_API_KEY` + `ENABLE_YOUTUBE_CC=true` (opt-in, see docs/SOURCES.md) |
+| reddit.com/prefs/apps | "script" app | `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`, `REDDIT_PASSWORD` (discovery only; needs creator permission) |
+| Slack/Discord (optional) | incoming webhook | `ALERT_WEBHOOK_URL` |
 | Cloudflare | R2 API token (Object Read & Write) | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
 
 ### 2. Cloudflare
@@ -53,20 +56,24 @@ npm run toaster -- rights:grant <id> --basis written_permission --evidence https
 npm run toaster -- produce --count 3
 npm run toaster -- publish --dry-run
 npm run toaster -- sync
+npm run toaster -- report            # weekly readiness: 21 targets, funnel, shortages, blockers
 npm run toaster -- status
 ```
 Without `TOASTER_API_URL` the CLI uses `work/db.json`, so everything can be exercised locally first.
 
 ## Weekly operation
-- Sunday morning: open Buffer → Drafts. 42 drafts (21 per channel) titled with the headline. Approve or delete.
-- Nothing else. Rejections are replaced automatically within ~30 minutes (Worker) or 2 hours (Actions fallback).
-- `GET https://<worker>/weeks/next` (Bearer token) shows drafted / approved / rejected / open-slot counts.
+- Sunday morning: open Buffer → Drafts. 42 drafts (21 per channel) titled with the headline. Approve ("Add to queue" or "Schedule") or delete.
+- Nothing else. A deletion is confirmed after two polls ≥ 10 min apart, then a replacement is rendered and drafted into the same slot (Worker: ~30–60 min; Actions fallback: ~2–4 h). Replacements are new drafts, so they appear in the Drafts tab for your next look.
+- Readiness: `GET https://<worker>/weeks/next/report?format=md` (Bearer token), or the step summary of the weekly GitHub Actions run, or `npm run toaster -- report`.
+- Alerts: the weekly run fails (red, e-mail from GitHub) and opens/updates a `[toaster] readiness <week>` issue when fewer than 21 videos are drafted; `ALERT_WEBHOOK_URL` additionally posts to Slack/Discord.
 
 ## When things go wrong
 | Symptom | Cause | Fix |
 |---|---|---|
 | Buffer "Video could not be read from its URL" | R2 bucket not public / wrong `R2_PUBLIC_BASE_URL` | open the URL in an incognito window; fix public access |
-| `blocked_rights` everywhere | only Reddit candidates, no permissions granted | run `rights:outreach`, send messages, `rights:grant` |
+| `blocked_rights` / `rights:unknown` everywhere | only Reddit/YouTube-CC candidates | add Pixabay/Pexels keys, or sign a clip-licensing deal (docs/SOURCES.md) |
+| report says `score_below_threshold` for most | stock sources are not viral enough | expected; needs a licensed viral library for 21/week |
+| sync shows `not found (1/2, awaiting confirmation)` | first observation of a deleted draft | nothing to do; confirmed on the next poll |
 | no captions | clip has no speech | expected; only the commentary box is shown |
 | `TTS failed` | ElevenLabs key/quota | video ships without VO; fix key |
 | drafts created but never approved → slot passes | nothing is published; the slot is simply skipped | approve earlier or lower the stock |

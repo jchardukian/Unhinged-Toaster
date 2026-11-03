@@ -10,6 +10,7 @@ import { loadTemplate, pickMusic, renderShort } from './render.js';
 import { scoreCandidate } from './score.js';
 import { synthesiseCommentary } from './tts.js';
 import { uploadPublic } from './upload.js';
+import { withRetry } from '../retry.js';
 
 /**
  * Turn ONE cleared, scored candidate into a finished Production:
@@ -27,7 +28,7 @@ export async function produceCandidate(cfg: Config, store: Store, c: Candidate):
     }
     await store.patchCandidate(c.id, { status: 'producing' });
 
-    const src = await downloadMedia(c, dir);
+    const src = await withRetry(`download ${c.id}`, () => downloadMedia(c, dir), { attempts: 3, baseMs: 3000 });
     const probe = await ffprobe(src);
     if (probe.duration < 3) throw new Error(`clip too short (${probe.duration.toFixed(1)}s)`);
 
@@ -53,15 +54,15 @@ export async function produceCandidate(cfg: Config, store: Store, c: Candidate):
     // render
     const template = loadTemplate(cfg);
     const outPath = path.join(dir, `${c.id}.final.mp4`);
-    const r = await renderShort(cfg, template, {
+    const r = await withRetry(`render ${c.id}`, () => renderShort(cfg, template, {
       clipPath: src, headline: copy.headline, commentary: copy.commentary, voPath: vo, words: transcript?.words ?? null,
       musicPath: pickMusic(cfg, c.category), outPath, workDir: dir,
-    });
+    }), { attempts: 2, baseMs: 1000 });
 
     // upload
     const key = `renders/${c.id}/${path.basename(outPath)}`;
-    const up = await uploadPublic(cfg, outPath, key, 'video/mp4');
-    const thumb = await uploadPublic(cfg, r.thumbnailPath, key.replace(/\.mp4$/, '.jpg'), 'image/jpeg');
+    const up = await withRetry(`upload ${c.id}`, () => uploadPublic(cfg, outPath, key, 'video/mp4'), { attempts: 3, baseMs: 2000 });
+    const thumb = await withRetry(`upload thumb ${c.id}`, () => uploadPublic(cfg, r.thumbnailPath, key.replace(/\.mp4$/, '.jpg'), 'image/jpeg'), { attempts: 3, baseMs: 2000 });
 
     const attribution = attributionText(c);
     const prod: Production = {

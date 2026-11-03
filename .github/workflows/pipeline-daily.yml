@@ -13,6 +13,10 @@ concurrency:
   group: toaster-pipeline
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   daily:
     runs-on: ubuntu-latest
@@ -25,11 +29,6 @@ jobs:
           cache: npm
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg python3-pil && pip install -q yt-dlp
       - run: npm ci && npm run build && npm run brand:generate
-      - name: Fetch approved brand assets (optional private bucket)
-        if: ${{ env.R2_ACCOUNT_ID != '' }}
-        env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-        run: echo "brand assets are committed in assets/brand; nothing to fetch"
       - name: run-daily
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -45,6 +44,11 @@ jobs:
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
           REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          ENABLE_YOUTUBE_CC: ${{ vars.ENABLE_YOUTUBE_CC }}
+          DISCOVERY_SOURCES: ${{ vars.DISCOVERY_SOURCES }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -52,6 +56,8 @@ jobs:
           R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL }}
           TOASTER_API_URL: ${{ vars.TOASTER_API_URL }}
           TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_APPROVAL_MODE: ${{ vars.BUFFER_APPROVAL_MODE }}
           BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE }}
           PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS }}
         run: node packages/pipeline/dist/cli.js run-daily --stock ${{ inputs.stock || '10' }}

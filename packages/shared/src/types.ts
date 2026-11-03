@@ -16,7 +16,7 @@ export const CONTENT_CATEGORIES: ContentCategory[] = [
   'wholesome_reactions',
 ];
 
-export type SourcePlatform = 'reddit' | 'youtube' | 'pexels' | 'pixabay' | 'manual' | 'licensed_library';
+export type SourcePlatform = 'reddit' | 'youtube' | 'pexels' | 'pixabay' | 'internet_archive' | 'manual' | 'licensed_library';
 
 /**
  * Rights lifecycle. Only `cleared` may be rendered or sent to Buffer.
@@ -142,6 +142,11 @@ export interface ScheduledPost {
   state: BufferPostState;
   last_synced_at: string | null;
   buffer_error: string | null;
+  sync_error?: string | null;          // last transient problem talking to Buffer (state untouched)
+  missing_count?: number;              // consecutive "not found" observations
+  missing_since?: string | null;       // first "not found" observation
+  idempotency_key?: string | null;     // `${batch_week}|${slot_at}|${service}`
+  create_attempts?: number;
   // performance (filled by metrics sync)
   views: number | null;
   likes: number | null;

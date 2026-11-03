@@ -29,10 +29,14 @@
 1. **Sunday 07:00 Chicago** – `weekly-batch.yml` renders until 21 finished shorts exist, then creates **42 drafts**
    (21 × YouTube + 21 × TikTok) in Buffer, each with its planned `dueAt` (Mon–Sun, three slots per day from `PUBLISH_SLOTS`).
 2. **You open Buffer** → Drafts. Approve the ones you like (Add to queue / Schedule). Delete the ones you don't.
-3. **Every 30 min** the Worker polls Buffer (there are no webhooks):
-   - draft → `scheduled`: marked approved; if Buffer put it in a different slot, `editPost` pins it back to the planned `dueAt`.
-   - draft vanished: marked **rejected**; the candidate is blacklisted; a replacement is produced and drafted for the same slot (via `workflow_dispatch`).
+3. **Every 30 min** the Worker polls Buffer (there are no webhooks) using `shared/sync.ts` (`runSync`), per post and per service:
+   - draft → `scheduled`: marked approved; if Buffer put it in a different slot, `editPost` pins it back to the planned `dueAt` and the returned dueAt is verified.
+   - "Post not found" twice, ≥ 10 min apart: marked **rejected** for that service only; a replacement is produced and drafted for that slot (via `workflow_dispatch`). The same production is never re-drafted into a slot where it was rejected.
+   - any transport / 5xx / 429 / GraphQL error: state unchanged, `sync_error` recorded, reported.
    - `sent`: marked published; metrics are pulled daily and feed category weights.
+   - candidate status = f(all its posts): any sent → published; any scheduled → approved; all deleted → rejected_user.
+4. **Draft creation is idempotent**: before each create (and before each retry) Buffer is queried for a post at the same channel + instant (±90 s) and adopted if present, so a timed-out request never produces duplicates. Each post row carries `idempotency_key = week|slot|service`.
+5. **Readiness report** (`shared/report.ts`): target 21 videos / 42 posts, discovered → scored → cleared → rendered → drafted → awaiting / approved / published / rejected, missing slots and shortage reasons. `run-weekly` exits non-zero and alerts (Actions summary, GitHub issue, optional webhook) when incomplete.
 
 Everything else is automatic. Nothing is ever published by the pipeline itself: `createPost` is always called with
 `saveToDraft: true` (or `needsApproval: true` if you move to Buffer's Team plan and set `BUFFER_APPROVAL_MODE=needs_approval`).

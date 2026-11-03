@@ -11,6 +11,10 @@ concurrency:
   group: toaster-pipeline
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   sync:
     if: ${{ vars.BUFFER_SYNC_VIA_ACTIONS == 'true' }}
@@ -34,6 +38,12 @@ jobs:
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          ENABLE_YOUTUBE_CC: ${{ vars.ENABLE_YOUTUBE_CC }}
+          DISCOVERY_SOURCES: ${{ vars.DISCOVERY_SOURCES }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

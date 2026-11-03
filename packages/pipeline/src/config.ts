@@ -42,6 +42,8 @@ export interface Config {
   publishSlots: string;
   approvalMode: 'draft' | 'needs_approval';
   youtubeKey: string | undefined;
+  enableYoutubeCc: boolean;
+  sources: string | undefined;
   reddit: { clientId?: string; clientSecret?: string; username?: string; password?: string; userAgent: string };
   pexelsKey: string | undefined;
   pixabayKey: string | undefined;
@@ -74,6 +76,8 @@ export function loadConfig(): Config {
     publishSlots: e.PUBLISH_SLOTS ?? '11:00,15:00,19:00',
     approvalMode: (e.BUFFER_APPROVAL_MODE as 'draft' | 'needs_approval') ?? 'draft',
     youtubeKey: e.YOUTUBE_API_KEY,
+    enableYoutubeCc: e.ENABLE_YOUTUBE_CC === 'true',
+    sources: e.DISCOVERY_SOURCES || undefined,
     reddit: {
       clientId: e.REDDIT_CLIENT_ID, clientSecret: e.REDDIT_CLIENT_SECRET, username: e.REDDIT_USERNAME, password: e.REDDIT_PASSWORD,
       userAgent: e.REDDIT_USER_AGENT ?? 'unhinged-toaster/0.1',

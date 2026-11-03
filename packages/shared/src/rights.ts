@@ -14,22 +14,41 @@ export function canProduce(c: Pick<Candidate, 'rights_status' | 'rights_basis' |
 }
 
 /** Default rights status for each discovery adapter. Only sources with an explicit license auto-clear. */
-export function initialRights(platform: SourcePlatform, meta: { license?: string | null }): Pick<Candidate, 'rights_status' | 'rights_basis' | 'rights_evidence' | 'rights_notes'> {
+export interface RightsMeta {
+  license?: string | null;
+  provenanceRisk?: 'low' | 'medium' | 'high';
+  provenanceReasons?: string[];
+  evidenceSuffix?: string;
+}
+
+export function initialRights(platform: SourcePlatform, meta: RightsMeta): Pick<Candidate, 'rights_status' | 'rights_basis' | 'rights_evidence' | 'rights_notes'> {
   switch (platform) {
     case 'youtube':
       if (meta.license === 'creativeCommon') {
+        if (meta.provenanceRisk && meta.provenanceRisk !== 'low') {
+          return {
+            rights_status: 'unknown', rights_basis: null, rights_evidence: null,
+            rights_notes: `CC BY label present but provenance risk ${meta.provenanceRisk}: ${meta.provenanceReasons?.join('; ') ?? ''}. A CC label does not prove the uploader owns the footage; needs manual verification.`,
+          };
+        }
         return {
           rights_status: 'cleared',
           rights_basis: 'cc_by',
-          rights_evidence: 'YouTube Data API status.license=creativeCommon (CC BY 3.0). Snapshot stored at discovery.',
-          rights_notes: 'Attribution required in description. Re-verify license at production time; uploader may change it.',
+          rights_evidence: `YouTube Data API status.license=creativeCommon (CC BY 3.0), provenance risk low. Snapshot stored at discovery${meta.evidenceSuffix ?? ''}.`,
+          rights_notes: 'Attribution required in description. Re-verify license at production time; uploader may change it. CC label is uploader-asserted, not verified ownership.',
         };
       }
       return { rights_status: 'unknown', rights_basis: null, rights_evidence: null, rights_notes: 'Standard YouTube license: reuse requires the uploader\'s written permission.' };
+    case 'internet_archive': {
+      const lic = (meta.license ?? '').toLowerCase();
+      if (/publicdomain|zero\/1\.0|cc0/.test(lic)) return { rights_status: 'cleared', rights_basis: lic.includes('zero') || lic.includes('cc0') ? 'cc0' : 'public_domain', rights_evidence: `${meta.evidenceSuffix ?? ''} licenseurl=${meta.license}`, rights_notes: 'Internet Archive item license as declared by the uploader/collection.' };
+      if (/licenses\/by\/\d/.test(lic)) return { rights_status: 'cleared', rights_basis: 'cc_by', rights_evidence: `${meta.evidenceSuffix ?? ''} licenseurl=${meta.license}`, rights_notes: 'Attribution required.' };
+      return { rights_status: 'unknown', rights_basis: null, rights_evidence: null, rights_notes: `Internet Archive license not auto-clearable: ${meta.license ?? 'none'} (NC/ND/SA or missing).` };
+    }
     case 'pexels':
       return { rights_status: 'cleared', rights_basis: 'pexels_license', rights_evidence: 'https://www.pexels.com/license/', rights_notes: 'Attribution appreciated, not required.' };
     case 'pixabay':
-      return { rights_status: 'cleared', rights_basis: 'pixabay_license', rights_evidence: 'https://pixabay.com/service/license-summary/', rights_notes: null };
+      return { rights_status: 'cleared', rights_basis: 'pixabay_license', rights_evidence: `https://pixabay.com/service/license-summary/${meta.evidenceSuffix ?? ''}`, rights_notes: 'Pixabay Content License: commercial use OK, no attribution required, must be transformed (we add template/captions/commentary); no unmodified redistribution.' };
     case 'licensed_library':
       return { rights_status: 'cleared', rights_basis: 'licensed', rights_evidence: meta.license ?? 'license id missing', rights_notes: null };
     case 'reddit':
@@ -54,6 +73,9 @@ export function attributionText(c: Pick<Candidate, 'author' | 'source_url' | 'ri
       return `Footage by ${who} via Pexels (${c.source_url}).`;
     case 'pixabay_license':
       return `Footage by ${who} via Pixabay (${c.source_url}).`;
+    case 'cc0':
+    case 'public_domain':
+      return `Footage: ${c.source_url} (public domain).`;
     case 'owned':
       return '';
     default:

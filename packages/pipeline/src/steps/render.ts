@@ -102,6 +102,8 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const iMascot = add('-loop', '1', '-i', mascot);
   const iBox = add('-loop', '1', '-i', hbox);
   const iLogo = add('-loop', '1', '-i', logo);
+  const shoutPath = path.join(cfg.assetsDir, 'brand', 'mascot_shout.png');
+  const iShout = fs.existsSync(shoutPath) ? add('-loop', '1', '-i', shoutPath) : -1;
   const iVo = job.voPath ? add('-i', job.voPath) : -1;
   const iMusic = job.musicPath ? add('-stream_loop', '-1', '-i', job.musicPath) : -1;
 
@@ -161,9 +163,16 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   f.push(`[${cur}][logo]overlay=x=${t.watermark.x}:y=${t.watermark.y}[wm0]`);
   f.push(`[wm0]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(t.handle)}':fontsize=${t.watermark.fontSize}:fontcolor=${t.colors.white}:borderw=4:bordercolor=${t.colors.black}:x=${t.watermark.x + t.watermark.logoWidth + 14}:y=${t.watermark.y + Math.round(t.watermark.logoWidth / 2 - t.watermark.fontSize / 2)}[wm]`);
 
-  // mascot (bobbing)
+  // mascot (bobbing); optional "shout" pose while the commentary plays
   f.push(`[${iMascot}:v]scale=${t.mascot.width}:-1[masc]`);
-  f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame:format=auto,format=yuv420p[vout]`);
+  if (iShout >= 0) {
+    const shoutEnable = outro > 0 ? `gte(t,${clipDur.toFixed(2)})` : `lt(t,${Math.min(clipDur, 3.5).toFixed(2)})`;
+    f.push(`[${iShout}:v]scale=${t.mascot.width}:-1[shout]`);
+    f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame:enable='not(${shoutEnable})'[m1]`);
+    f.push(`[m1][shout]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude * 1.6}*sin(t*${t.mascot.bobSpeed * 2.5}):eval=frame:enable='${shoutEnable}':format=auto,format=yuv420p[vout]`);
+  } else {
+    f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame:format=auto,format=yuv420p[vout]`);
+  }
 
   // ---------- audio graph
   const aParts: string[] = [];

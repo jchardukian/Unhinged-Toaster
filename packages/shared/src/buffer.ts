@@ -39,6 +39,8 @@ export interface BufferPost {
 
 export type BufferMode = 'addToQueue' | 'customScheduled' | 'shareNow' | 'shareNext';
 
+export type PostLookup = { status: 'found'; post: BufferPost } | { status: 'not_found' } | { status: 'error'; message: string };
+
 export interface CreateVideoPostInput {
   channelId: string;
   text: string;
@@ -47,6 +49,8 @@ export interface CreateVideoPostInput {
   mode?: BufferMode;
   saveToDraft?: boolean;
   needsApproval?: boolean;     // Team plan only
+  /** Escape hatch for a future human-confirmed flow. Never set by the pipeline. */
+  unsafeAllowScheduled?: boolean;
   youtube?: { title: string; categoryId: string; privacy?: 'public' | 'private' | 'unlisted'; madeForKids?: boolean; notifySubscribers?: boolean; license?: 'youtube' | 'creativeCommon'; isAiGenerated?: boolean };
   tiktok?: { title?: string; isAiGenerated?: boolean };
   tagIds?: string[];
@@ -111,8 +115,18 @@ export class BufferClient {
     return d.channels;
   }
 
-  /** Create a video post. Defaults to a DRAFT (saveToDraft: true) — nothing is published without approval. */
+  /**
+   * Create a video post. Defaults to a DRAFT (saveToDraft: true) — nothing is published without approval.
+   * Publish guard: refuses shareNow/shareNext and refuses non-draft posts unless `needsApproval` (Team plan queue)
+   * or the explicit `unsafeAllowScheduled` escape hatch is set.
+   */
   async createVideoPost(input: CreateVideoPostInput): Promise<BufferPost> {
+    const mode = input.mode ?? (input.dueAt ? 'customScheduled' : 'addToQueue');
+    const saveToDraft = input.saveToDraft ?? true;
+    if (mode === 'shareNow' || mode === 'shareNext') throw new BufferApiError(`publish guard: mode ${mode} is not allowed`, 0);
+    if (!saveToDraft && !input.needsApproval && !input.unsafeAllowScheduled) {
+      throw new BufferApiError('publish guard: posts must be created as drafts (saveToDraft) or needsApproval', 0);
+    }
     const metadata: Record<string, unknown> = {};
     if (input.youtube) metadata.youtube = { privacy: 'public', madeForKids: false, notifySubscribers: true, ...input.youtube };
     if (input.tiktok) metadata.tiktok = input.tiktok;
@@ -120,8 +134,8 @@ export class BufferClient {
       channelId: input.channelId,
       text: input.text,
       schedulingType: 'automatic',
-      mode: input.mode ?? (input.dueAt ? 'customScheduled' : 'addToQueue'),
-      saveToDraft: input.saveToDraft ?? true,
+      mode,
+      saveToDraft,
       assets: [{ video: { url: input.videoUrl, metadata: input.videoTitle ? { title: input.videoTitle } : undefined } }],
       metadata,
     };
@@ -156,7 +170,20 @@ export class BufferClient {
   /** Fetch several posts by id in one request using aliases (max 30 aliases per query per Buffer limits). */
   async getPosts(ids: string[]): Promise<Map<string, BufferPost | null>> {
     const out = new Map<string, BufferPost | null>();
+    for (const [id, lk] of await this.lookupPosts(ids)) out.set(id, lk.status === 'found' ? lk.post : null);
+    return out;
+  }
+
+  /**
+   * Like getPosts but distinguishes a genuine "Post not found" (user deleted the draft) from any other error.
+   * A deleted post yields a per-alias "Post not found for id: X" GraphQL error with partial data (verified live 2026-11-02).
+   * A transport failure for a chunk marks every id in that chunk as 'error' so callers never treat it as a deletion.
+   */
+  async lookupPosts(ids: string[]): Promise<Map<string, PostLookup>> {
+    const out = new Map<string, PostLookup>();
+    let chunks = 0, failedChunks = 0, firstError: Error | null = null;
     for (let i = 0; i < ids.length; i += 25) {
+      chunks++;
       const chunk = ids.slice(i, i + 25);
       const vars: Record<string, string> = {};
       const parts = chunk.map((id, k) => {
@@ -164,12 +191,65 @@ export class BufferClient {
         return `p${k}: post(input: { id: $id${k} }) { ${POST_FIELDS} }`;
       });
       const varDecl = chunk.map((_, k) => `$id${k}: PostId!`).join(', ');
-      // A deleted post yields a per-alias "Post not found for id: X" error with partial data (verified live);
-      // null for that alias is exactly what reconcile needs ("user rejected the draft").
-      const d = await this.gql<Record<string, BufferPost | null>>(`query(${varDecl}) { ${parts.join('\n')} }`, vars, { allowPartial: true });
-      chunk.forEach((id, k) => out.set(id, d[`p${k}`] ?? null));
+      let raw: { data?: Record<string, BufferPost | null>; errors?: { message: string; path?: (string | number)[] }[] };
+      try {
+        raw = await this.gqlRaw(`query(${varDecl}) { ${parts.join('\n')} }`, vars);
+      } catch (e) {
+        failedChunks++;
+        firstError ??= e as Error;
+        for (const id of chunk) out.set(id, { status: 'error', message: (e as Error).message });
+        continue;
+      }
+      const errByAlias = new Map<string, string>();
+      for (const err of raw.errors ?? []) {
+        const alias = typeof err.path?.[0] === 'string' ? (err.path[0] as string) : undefined;
+        if (alias) errByAlias.set(alias, err.message);
+      }
+      chunk.forEach((id, k) => {
+        const alias = `p${k}`;
+        const post = raw.data?.[alias];
+        if (post) { out.set(id, { status: 'found', post }); return; }
+        const msg = errByAlias.get(alias) ?? (raw.errors ?? []).find((e) => e.message.includes(id))?.message;
+        if (msg && /not found/i.test(msg)) out.set(id, { status: 'not_found' });
+        else if (msg) out.set(id, { status: 'error', message: msg });
+        else if (raw.data && alias in raw.data) out.set(id, { status: 'not_found' });
+        else out.set(id, { status: 'error', message: 'missing alias in response' });
+      });
     }
+    // Buffer completely unreachable: surface it as one failure so the caller treats the whole poll as failed.
+    if (chunks > 0 && failedChunks === chunks && firstError) throw firstError;
     return out;
+  }
+
+  /** Raw GraphQL call that returns data + errors without throwing on partial results. Throws on transport failure. */
+  async gqlRaw<T>(query: string, variables: Record<string, unknown> = {}): Promise<{ data?: T; errors?: { message: string; path?: (string | number)[] }[] }> {
+    let attempt = 0;
+    for (;;) {
+      const res = await this.f(this.endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.opts.apiKey}` },
+        body: JSON.stringify({ query, variables }),
+      });
+      this.lastRateLimit = res.headers.get('ratelimit');
+      if ((res.status === 429 || res.status >= 500) && attempt < this.maxRetries) {
+        const retry = Number(res.headers.get('retry-after') ?? String(2 ** attempt));
+        await sleep(Math.min(retry, 60) * 1000);
+        attempt++;
+        continue;
+      }
+      const json = (await res.json().catch(() => null)) as { data?: T; errors?: { message: string; path?: (string | number)[] }[] } | null;
+      if (!res.ok) throw new BufferApiError(`Buffer HTTP ${res.status}: ${json?.errors?.map((e) => e.message).join('; ') ?? res.statusText}`, res.status, undefined, json);
+      if (!json || (!json.data && !json.errors)) throw new BufferApiError('Buffer returned an empty response', res.status, undefined, json);
+      return json;
+    }
+  }
+
+  /** Find a post already sitting in a channel at a given instant (idempotent draft creation). */
+  async findPostAt(organizationId: string, channelId: string, slotIso: string, toleranceMs = 90_000): Promise<BufferPost | null> {
+    const start = new Date(Date.parse(slotIso) - toleranceMs).toISOString();
+    const end = new Date(Date.parse(slotIso) + toleranceMs).toISOString();
+    const page = await this.listPosts({ organizationId, channelIds: [channelId], status: ['draft', 'needs_approval', 'scheduled', 'sending', 'sent'], dueAfter: start, dueBefore: end, first: 10 });
+    return page.posts.find((p) => p.dueAt && Math.abs(Date.parse(p.dueAt) - Date.parse(slotIso)) <= toleranceMs) ?? null;
   }
 
   async listPosts(params: {

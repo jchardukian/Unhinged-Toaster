@@ -54,10 +54,10 @@ export function parseSlots(spec: string): { hh: number; mm: number }[] {
  * Build the 21-slot plan for the week starting on the Monday after `from` (never the current week,
  * so there is always a full review window). Each slot gets both services at the same instant.
  */
-export function buildWeekPlan(from: Date, tz: string, slotSpec: string, services: BufferService[] = ['youtube', 'tiktok']): SlotPlan {
+export function buildWeekPlan(from: Date, tz: string, slotSpec: string, services: BufferService[] = ['youtube', 'tiktok'], weekOffset = 1): SlotPlan {
   const slots = parseSlots(slotSpec);
   const thisMonday = mondayOfWeek(from, tz);
-  const nextMondayUtc = new Date(Date.UTC(thisMonday.y, thisMonday.m - 1, thisMonday.day + 7));
+  const nextMondayUtc = new Date(Date.UTC(thisMonday.y, thisMonday.m - 1, thisMonday.day + 7 * weekOffset));
   const plan: SlotPlan = { week: isoWeek(nextMondayUtc), slots: [] };
   for (let i = 0; i < 7; i++) {
     const day = new Date(nextMondayUtc.getTime() + i * 86400000);

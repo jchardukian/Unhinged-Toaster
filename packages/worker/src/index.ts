@@ -5,8 +5,8 @@
  *  - Serves rendered media from R2 at /media/<key> (if no public bucket domain is configured)
  */
 import {
-  BufferClient, normaliseMetrics, reconcilePost, toBufferDueAt, updateCategoryWeights, buildWeekPlan,
-  type Candidate, type CategoryWeight, type ContentCategory, type Production, type ScheduledPost, type SyncResult, type WeekStatus,
+  BufferClient, normaliseMetrics, runSync, updateCategoryWeights, buildWeekPlan, buildReadinessReport, formatReadinessMarkdown,
+  type Candidate, type CategoryWeight, type ContentCategory, type Production, type ScheduledPost, type SyncResult, type SyncStore, type WeekStatus,
 } from '@toaster/shared';
 
 export interface Env {
@@ -25,7 +25,7 @@ export interface Env {
 
 const CANDIDATE_COLS = ['id', 'source_platform', 'source_id', 'source_url', 'media_url', 'author', 'author_url', 'title', 'description', 'category', 'duration_sec', 'width', 'height', 'published_at', 'discovered_at', 'views', 'likes', 'comments', 'shares', 'engagement_velocity', 'heuristic_score', 'llm_score', 'final_score', 'llm_rationale', 'safety_flags', 'phash', 'duplicate_of', 'rights_status', 'rights_basis', 'rights_evidence', 'rights_notes', 'attribution_text', 'status', 'status_reason', 'updated_at'] as const;
 const PRODUCTION_COLS = ['id', 'candidate_id', 'headline', 'commentary', 'caption_text', 'hashtags', 'voice_id', 'music_track', 'r2_key', 'public_url', 'thumbnail_url', 'duration_sec', 'render_log', 'created_at', 'updated_at'] as const;
-const POST_COLS = ['id', 'production_id', 'candidate_id', 'service', 'buffer_channel_id', 'buffer_post_id', 'slot_at', 'batch_week', 'state', 'last_synced_at', 'buffer_error', 'views', 'likes', 'comments', 'shares', 'metrics_updated_at', 'created_at', 'updated_at'] as const;
+const POST_COLS = ['id', 'production_id', 'candidate_id', 'service', 'buffer_channel_id', 'buffer_post_id', 'slot_at', 'batch_week', 'state', 'last_synced_at', 'buffer_error', 'views', 'likes', 'comments', 'shares', 'metrics_updated_at', 'sync_error', 'missing_count', 'missing_since', 'idempotency_key', 'create_attempts', 'created_at', 'updated_at'] as const;
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -62,7 +62,7 @@ async function route(req: Request, env: Env, url: URL, ctx: ExecutionContext): P
   }
   if (m === 'GET' && p === '/candidates') {
     const status = url.searchParams.get('status')?.split(',').filter(Boolean);
-    const limit = Math.min(1000, Number(url.searchParams.get('limit') ?? 500));
+    const limit = Math.min(5000, Number(url.searchParams.get('limit') ?? 2000));
     const where = status?.length ? `WHERE status IN (${status.map(() => '?').join(',')})` : '';
     const { results } = await env.DB.prepare(`SELECT * FROM candidates ${where} ORDER BY final_score DESC NULLS LAST, discovered_at DESC LIMIT ?`).bind(...(status ?? []), limit).all();
     return json(results);
@@ -100,9 +100,11 @@ async function route(req: Request, env: Env, url: URL, ctx: ExecutionContext): P
   if (m === 'GET' && p === '/posts') {
     const state = url.searchParams.get('state')?.split(',').filter(Boolean);
     const week = url.searchParams.get('week');
+    const cid = url.searchParams.get('candidate_id');
     const conds: string[] = []; const binds: unknown[] = [];
     if (state?.length) { conds.push(`state IN (${state.map(() => '?').join(',')})`); binds.push(...state); }
     if (week) { conds.push('batch_week = ?'); binds.push(week); }
+    if (cid) { conds.push('candidate_id = ?'); binds.push(cid); }
     const { results } = await env.DB.prepare(`SELECT * FROM posts ${conds.length ? 'WHERE ' + conds.join(' AND ') : ''} ORDER BY slot_at`).bind(...binds).all();
     return json(results);
   }
@@ -123,12 +125,16 @@ async function route(req: Request, env: Env, url: URL, ctx: ExecutionContext): P
   if (m === 'POST' && p === '/dispatch/weekly') return json(await dispatchWorkflow(env, 'weekly-batch.yml'));
   if (m === 'POST' && p === '/dispatch/daily') return json(await dispatchWorkflow(env, 'pipeline-daily.yml'));
 
+  mm = p.match(/^\/weeks\/(\d{4}-W\d{2}|next|current)\/report$/);
+  if (mm && m === 'GET') {
+    const r = await readiness(env, mm[1]);
+    return url.searchParams.get('format') === 'md' ? new Response(formatReadinessMarkdown(r), { headers: { 'content-type': 'text/markdown' } }) : json(r);
+  }
   mm = p.match(/^\/weeks\/(\d{4}-W\d{2}|next)$/);
   if (mm && m === 'GET') return json(await weekStatus(env, mm[1]));
 
   if (m === 'GET' && p === '/events') return json((await env.DB.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 200').all()).results);
 
-  // Upload a rendered file straight into R2 through the Worker (alternative to S3 credentials in CI)
   mm = p.match(/^\/upload\/(.+)$/);
   if (mm && m === 'PUT') {
     const key = decodeURIComponent(mm[1]);
@@ -163,39 +169,27 @@ async function serveMedia(env: Env, key: string, req: Request): Promise<Response
   return new Response(obj.body, { headers });
 }
 
-// ------------------------------------------------------------------ Buffer sync (approval loop)
+// ------------------------------------------------------------------ Buffer sync (approval loop) via shared runSync
+function d1SyncStore(env: Env): SyncStore {
+  return {
+    listPendingPosts: async () => (await env.DB.prepare("SELECT * FROM posts WHERE state IN ('draft','needs_approval','scheduled','sending') AND buffer_post_id IS NOT NULL").all<ScheduledPost>()).results,
+    savePost: async (p) => {
+      await env.DB.prepare('UPDATE posts SET state = ?, last_synced_at = ?, buffer_error = ?, sync_error = ?, missing_count = ?, missing_since = ?, updated_at = ? WHERE id = ?')
+        .bind(p.state, p.last_synced_at, p.buffer_error, p.sync_error ?? null, p.missing_count ?? 0, p.missing_since ?? null, new Date().toISOString(), p.id).run();
+    },
+    listPostsForCandidate: async (cid) => (await env.DB.prepare('SELECT * FROM posts WHERE candidate_id = ?').bind(cid).all<ScheduledPost>()).results,
+    patchCandidate: async (id, patch) => {
+      await env.DB.prepare('UPDATE candidates SET status = COALESCE(?, status), status_reason = COALESCE(?, status_reason), updated_at = ? WHERE id = ?')
+        .bind(patch.status ?? null, patch.status_reason ?? null, new Date().toISOString(), id).run();
+    },
+    logEvent: (kind, ref, detail) => logEvent(env, kind, ref, detail),
+  };
+}
+
 async function syncBuffer(env: Env): Promise<SyncResult> {
   if (!env.BUFFER_API_KEY) return { checked: 0, approved: 0, rejected: 0, published: 0, errors: [{ post_id: '-', error: 'BUFFER_API_KEY secret missing' }], replacements_needed: 0 };
   const client = new BufferClient({ apiKey: env.BUFFER_API_KEY });
-  const { results } = await env.DB.prepare("SELECT * FROM posts WHERE state IN ('draft','needs_approval','scheduled','sending') AND buffer_post_id IS NOT NULL").all<ScheduledPost>();
-  const result: SyncResult = { checked: results.length, approved: 0, rejected: 0, published: 0, errors: [], replacements_needed: 0 };
-  if (results.length === 0) return result;
-  const theirs = await client.getPosts(results.map((p) => p.buffer_post_id!));
-  const now = new Date().toISOString();
-  for (const p of results) {
-    const r = reconcilePost(p, theirs.get(p.buffer_post_id!) ?? null);
-    if (r.approved) {
-      result.approved++;
-      await env.DB.prepare("UPDATE candidates SET status = 'approved', updated_at = ? WHERE id = ?").bind(now, p.candidate_id).run();
-      if (r.needsReschedule) {
-        try { await client.reschedulePost(p.buffer_post_id!, toBufferDueAt(p.slot_at, env.BUFFER_TIMEZONE)); }
-        catch (e) { result.errors.push({ post_id: p.buffer_post_id!, error: `reschedule: ${(e as Error).message}` }); }
-      }
-      await logEvent(env, 'approved', p.id, { service: p.service, slot_at: p.slot_at });
-    }
-    if (r.rejected) {
-      result.rejected++;
-      if (Date.parse(p.slot_at) > Date.now() + 3 * 3600_000) result.replacements_needed++;
-      await env.DB.prepare("UPDATE candidates SET status = 'rejected_user', status_reason = ?, updated_at = ? WHERE id = ?").bind(`rejected in Buffer (${p.service})`, now, p.candidate_id).run();
-      await logEvent(env, 'rejected', p.id, { service: p.service, slot_at: p.slot_at });
-    }
-    if (r.published) {
-      result.published++;
-      await env.DB.prepare("UPDATE candidates SET status = 'published', updated_at = ? WHERE id = ?").bind(now, p.candidate_id).run();
-    }
-    if (r.error) result.errors.push({ post_id: p.buffer_post_id!, error: r.error });
-    await env.DB.prepare('UPDATE posts SET state = ?, last_synced_at = ?, buffer_error = ?, updated_at = ? WHERE id = ?').bind(r.state, now, r.error, now, p.id).run();
-  }
+  const result = await runSync(client, d1SyncStore(env), { tz: env.BUFFER_TIMEZONE });
   // Replacements are rendered by the pipeline runner (needs FFmpeg): kick the workflow.
   if (result.replacements_needed > 0) {
     const d = await dispatchWorkflow(env, 'weekly-batch.yml', { reason: `replace ${result.replacements_needed} rejected post(s)` });
@@ -226,6 +220,15 @@ async function learn(env: Env): Promise<{ updated: number; weights: CategoryWeig
   const weights = updateCategoryWeights(weightsNow, obs, now);
   await env.DB.batch(weights.map((w) => env.DB.prepare('UPDATE category_weights SET weight = ?, samples = ?, avg_views = ?, updated_at = ? WHERE category = ?').bind(w.weight, w.samples, w.avg_views, w.updated_at, w.category)));
   return { updated, weights };
+}
+
+async function readiness(env: Env, week: string) {
+  const plan = buildWeekPlan(new Date(), env.BUFFER_TIMEZONE, env.PUBLISH_SLOTS, ['youtube', 'tiktok'], week === 'current' ? 0 : 1);
+  if (week !== 'next' && week !== 'current' && week !== plan.week) plan.week = week;
+  const candidates = (await env.DB.prepare('SELECT * FROM candidates').all<Candidate>()).results;
+  const productions = (await env.DB.prepare('SELECT * FROM productions').all<Production>()).results;
+  const posts = (await env.DB.prepare('SELECT * FROM posts WHERE batch_week = ?').bind(plan.week).all<ScheduledPost>()).results;
+  return buildReadinessReport({ plan, candidates, productions, posts });
 }
 
 async function weekStatus(env: Env, week: string): Promise<WeekStatus> {

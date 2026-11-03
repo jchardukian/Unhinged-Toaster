@@ -8,3 +8,6 @@ export * from './text.js';
 export * from './buffer.js';
 export * from './api-contract.js';
 export * from './reconcile.js';
+export * from './sync.js';
+export * from './report.js';
+export * from './provenance.js';
