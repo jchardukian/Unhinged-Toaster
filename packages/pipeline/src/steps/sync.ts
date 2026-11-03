@@ -11,6 +11,7 @@ export function syncStoreOf(store: Store): SyncStore {
     savePost: (p) => store.upsertPost(p),
     listPostsForCandidate: async (cid) => (await store.listPosts()).filter((p) => p.candidate_id === cid),
     patchCandidate: async (id, patch) => { await store.patchCandidate(id, patch); },
+    getCandidate: (id) => store.getCandidate(id),
     logEvent: async (kind, ref, detail) => { log.info(`event ${kind} ${ref ?? ''} ${JSON.stringify(detail)}`); },
   };
 }

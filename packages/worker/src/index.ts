@@ -23,9 +23,9 @@ export interface Env {
   PUBLISH_SLOTS: string;
 }
 
-const CANDIDATE_COLS = ['id', 'source_platform', 'source_id', 'source_url', 'media_url', 'author', 'author_url', 'title', 'description', 'category', 'duration_sec', 'width', 'height', 'published_at', 'discovered_at', 'views', 'likes', 'comments', 'shares', 'engagement_velocity', 'heuristic_score', 'llm_score', 'final_score', 'llm_rationale', 'safety_flags', 'phash', 'duplicate_of', 'rights_status', 'rights_basis', 'rights_evidence', 'rights_notes', 'attribution_text', 'status', 'status_reason', 'updated_at'] as const;
-const PRODUCTION_COLS = ['id', 'candidate_id', 'headline', 'commentary', 'caption_text', 'hashtags', 'voice_id', 'music_track', 'r2_key', 'public_url', 'thumbnail_url', 'duration_sec', 'render_log', 'created_at', 'updated_at'] as const;
-const POST_COLS = ['id', 'production_id', 'candidate_id', 'service', 'buffer_channel_id', 'buffer_post_id', 'slot_at', 'batch_week', 'state', 'last_synced_at', 'buffer_error', 'views', 'likes', 'comments', 'shares', 'metrics_updated_at', 'sync_error', 'missing_count', 'missing_since', 'idempotency_key', 'create_attempts', 'created_at', 'updated_at'] as const;
+const CANDIDATE_COLS = ['id', 'source_platform', 'source_id', 'source_url', 'media_url', 'author', 'author_url', 'title', 'description', 'category', 'duration_sec', 'width', 'height', 'published_at', 'discovered_at', 'views', 'likes', 'comments', 'shares', 'engagement_velocity', 'heuristic_score', 'llm_score', 'final_score', 'llm_rationale', 'safety_flags', 'phash', 'duplicate_of', 'rights_status', 'rights_basis', 'rights_evidence', 'rights_notes', 'copyright_risk', 'copyright_risk_reasons', 'attribution_text', 'status', 'status_reason', 'updated_at'] as const;
+const PRODUCTION_COLS = ['id', 'candidate_id', 'headline', 'commentary', 'caption_text', 'hashtags', 'voice_id', 'music_track', 'r2_key', 'public_url', 'thumbnail_url', 'duration_sec', 'render_log', 'reuse_basis', 'edit_plan', 'created_at', 'updated_at'] as const;
+const POST_COLS = ['id', 'production_id', 'candidate_id', 'service', 'buffer_channel_id', 'buffer_post_id', 'slot_at', 'batch_week', 'state', 'last_synced_at', 'buffer_error', 'views', 'likes', 'comments', 'shares', 'metrics_updated_at', 'sync_error', 'missing_count', 'missing_since', 'idempotency_key', 'create_attempts', 'reuse_uncertain', 'public_text', 'review_block_stripped', 'created_at', 'updated_at'] as const;
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -172,16 +172,18 @@ async function serveMedia(env: Env, key: string, req: Request): Promise<Response
 // ------------------------------------------------------------------ Buffer sync (approval loop) via shared runSync
 function d1SyncStore(env: Env): SyncStore {
   return {
-    listPendingPosts: async () => (await env.DB.prepare("SELECT * FROM posts WHERE state IN ('draft','needs_approval','scheduled','sending') AND buffer_post_id IS NOT NULL").all<ScheduledPost>()).results,
+    listPendingPosts: async () => (await env.DB.prepare("SELECT * FROM posts WHERE state IN ('draft','needs_approval','scheduled','sending') AND buffer_post_id IS NOT NULL").all<ScheduledPost>()).results
+      .map((p) => ({ ...p, reuse_uncertain: !!p.reuse_uncertain, review_block_stripped: !!p.review_block_stripped })),
     savePost: async (p) => {
-      await env.DB.prepare('UPDATE posts SET state = ?, last_synced_at = ?, buffer_error = ?, sync_error = ?, missing_count = ?, missing_since = ?, updated_at = ? WHERE id = ?')
-        .bind(p.state, p.last_synced_at, p.buffer_error, p.sync_error ?? null, p.missing_count ?? 0, p.missing_since ?? null, new Date().toISOString(), p.id).run();
+      await env.DB.prepare('UPDATE posts SET state = ?, last_synced_at = ?, buffer_error = ?, sync_error = ?, missing_count = ?, missing_since = ?, review_block_stripped = ?, updated_at = ? WHERE id = ?')
+        .bind(p.state, p.last_synced_at, p.buffer_error, p.sync_error ?? null, p.missing_count ?? 0, p.missing_since ?? null, p.review_block_stripped ? 1 : 0, new Date().toISOString(), p.id).run();
     },
     listPostsForCandidate: async (cid) => (await env.DB.prepare('SELECT * FROM posts WHERE candidate_id = ?').bind(cid).all<ScheduledPost>()).results,
     patchCandidate: async (id, patch) => {
-      await env.DB.prepare('UPDATE candidates SET status = COALESCE(?, status), status_reason = COALESCE(?, status_reason), updated_at = ? WHERE id = ?')
-        .bind(patch.status ?? null, patch.status_reason ?? null, new Date().toISOString(), id).run();
+      await env.DB.prepare('UPDATE candidates SET status = COALESCE(?, status), status_reason = COALESCE(?, status_reason), rights_status = COALESCE(?, rights_status), rights_basis = COALESCE(?, rights_basis), rights_evidence = COALESCE(?, rights_evidence), updated_at = ? WHERE id = ?')
+        .bind(patch.status ?? null, patch.status_reason ?? null, patch.rights_status ?? null, patch.rights_basis ?? null, patch.rights_evidence ?? null, new Date().toISOString(), id).run();
     },
+    getCandidate: async (id) => env.DB.prepare('SELECT rights_status FROM candidates WHERE id = ?').bind(id).first<{ rights_status: Candidate['rights_status'] }>(),
     logEvent: (kind, ref, detail) => logEvent(env, kind, ref, detail),
   };
 }

@@ -1,4 +1,5 @@
 import type { BufferClient, BufferPost, PostLookup } from './buffer.js';
+import { hasReviewBlock, ownerReviewedRights } from './rights.js';
 import { toBufferDueAt } from './schedule.js';
 import type { Candidate, ScheduledPost } from './types.js';
 import type { SyncResult } from './api-contract.js';
@@ -19,6 +20,7 @@ export interface SyncStore {
   savePost(p: ScheduledPost): Promise<void>;
   listPostsForCandidate(candidateId: string): Promise<ScheduledPost[]>;
   patchCandidate(id: string, patch: Partial<Candidate>): Promise<void>;
+  getCandidate?(id: string): Promise<Pick<Candidate, 'rights_status'> | null>;
   logEvent?(kind: string, refId: string | null, detail: unknown): Promise<void>;
 }
 
@@ -30,7 +32,7 @@ export interface SyncOptions {
   replacementLeadMs?: number;  // only slots further out than this get a replacement (default 3 h)
 }
 
-export type BufferClientLike = Pick<BufferClient, 'lookupPosts' | 'reschedulePost'>;
+export type BufferClientLike = Pick<BufferClient, 'lookupPosts' | 'reschedulePost'> & Partial<Pick<BufferClient, 'editPost'>>;
 
 export const PENDING_STATES: ScheduledPost['state'][] = ['draft', 'needs_approval', 'scheduled', 'sending'];
 
@@ -127,6 +129,32 @@ export async function runSync(client: BufferClientLike, store: SyncStore, opts: 
         result.errors.push({ post_id: p.buffer_post_id!, error: err });
       }
     }
+    // Transformation-review drafts: once approved, record the owner's decision and remove the review note from the
+    // public caption. Retried on every poll until it succeeds (the post stays scheduled, so there is time).
+    const approvedNow = r.approved || (p.state === 'scheduled' && p.reuse_uncertain && !p.review_block_stripped);
+    if (approvedNow && p.reuse_uncertain) {
+      if (r.approved) {
+        const evidence = `Owner approved Buffer ${p.service} post ${p.buffer_post_id} at ${ts} (transformation review)`;
+        const cand = (await store.getCandidate?.(p.candidate_id)) ?? { rights_status: 'transformation_review' as const };
+        const rights = ownerReviewedRights(cand, evidence);
+        if (rights) await store.patchCandidate(p.candidate_id, rights);
+        await store.logEvent?.('owner_reviewed', p.id, { candidate: p.candidate_id, evidence });
+      }
+      if (!p.review_block_stripped && hasReviewBlock(bp.text) && p.public_text && client.editPost) {
+        try {
+          const edited = await client.editPost(p.buffer_post_id!, { text: p.public_text });
+          if (hasReviewBlock(edited.text)) throw new Error('review note still present after edit');
+          p.review_block_stripped = true;
+          await store.logEvent?.('review_block_stripped', p.id, {});
+        } catch (e) {
+          const err = `strip review note failed: ${(e as Error).message}`;
+          p.sync_error = err;
+          result.errors.push({ post_id: p.buffer_post_id!, error: err });
+        }
+      } else if (!hasReviewBlock(bp.text)) {
+        p.review_block_stripped = true;
+      }
+    }
     if (r.published) result.published++;
     if (r.error) result.errors.push({ post_id: p.buffer_post_id!, error: r.error });
     await store.savePost(p);
@@ -137,6 +165,10 @@ export async function runSync(client: BufferClientLike, store: SyncStore, opts: 
     const posts = await store.listPostsForCandidate(cid);
     const status = deriveCandidateStatus(posts);
     if (status) await store.patchCandidate(cid, { status, status_reason: describePosts(posts) });
+  }
+  // a scheduled review post that still carries the note: keep it visible as an error until stripped
+  for (const p of pending) if (p.state === 'scheduled' && p.reuse_uncertain && !p.review_block_stripped && !result.errors.some((e) => e.post_id === p.buffer_post_id)) {
+    result.errors.push({ post_id: p.buffer_post_id!, error: 'approved review post still carries the review note' });
   }
   return result;
 }

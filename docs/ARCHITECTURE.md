@@ -65,6 +65,13 @@ Everything else is automatic. Nothing is ever published by the pipeline itself: 
 Exact (normalised URL) → perceptual (64-bit DCT pHash on 5 sampled frames, mean Hamming ≤ 10 with ±1 frame tolerance)
 → textual (title trigram Jaccard ≥ 0.8 and duration within 1.5 s).
 
+## Comedic edit engine (`shared/editplan.ts`, `pipeline/steps/analyze.ts`, `render.ts`)
+
+1. `analyzeClip`: per-100 ms audio RMS (astats) and per-frame scene-change scores → `detectPeak` (largest audio onset, else loudest moment, else strongest scene change, else 62 % of the clip).
+2. The copywriter LLM also acts as director: `sticker` (1–3 word reaction), `freeze_text`, `edit_style` (full/light).
+3. `planEdit` builds the timeline: freeze-frame 1 s before the peak (skipped inside dialogue), punch-in zoom ×1.28 at the peak, slow-motion replay (0.5×) of peak ± 0.8 s with a REPLAY label, reaction sticker popping at the peak, outro with the spoken commentary. Beats are dropped (replay first, then freeze) to stay ≤ 59 s. Caption timings are remapped across the freeze.
+4. Source audio is muted when the scorer flags commercial music; the replay audio is the slowed original.
+
 ## Rendering (`packages/pipeline/src/steps/render.ts`)
 
 Single FFmpeg graph, 1080×1920 @ 30 fps, H.264 CRF 20, AAC 160k, loudnorm −14 LUFS:

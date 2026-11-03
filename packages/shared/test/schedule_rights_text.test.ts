@@ -31,10 +31,13 @@ test('parseSlots validates', () => {
   assert.equal(parseSlots('9:00,15:00,19:30')[2].mm, 30);
 });
 
-test('rights policy never clears unknown sources', () => {
+test('rights policy never clears unlicensed sources (review path is separate and policy-gated)', () => {
   const reddit = initialRights('reddit', {});
-  assert.equal(reddit.rights_status, 'unknown');
-  assert.equal(canProduce({ ...reddit }), false);
+  assert.equal(reddit.rights_status, 'transformation_review');
+  assert.equal(reddit.rights_basis, null);
+  assert.equal(canProduce({ ...reddit, copyright_risk: 'low' }, { transformationReview: false }), false);
+  assert.equal(canProduce({ ...reddit, copyright_risk: 'high' }), false);
+  assert.equal(canProduce({ rights_status: 'unknown', rights_basis: null, rights_evidence: null, copyright_risk: 'low' }), false);
   const yt = initialRights('youtube', { license: 'creativeCommon' });
   assert.equal(canProduce({ ...yt }), true);
   assert.equal(canProduce({ rights_status: 'cleared', rights_basis: 'cc_by', rights_evidence: '' }), false, 'evidence required');

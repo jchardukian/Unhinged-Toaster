@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { BufferClient, buildWeekPlan, type Candidate, type Production } from '@toaster/shared';
+import { BufferClient, buildWeekPlan, REVIEW_BLOCK_START, type Candidate, type Production } from '@toaster/shared';
 import type { Config } from '../src/config.js';
 import { JsonStore } from '../src/store.js';
 import { publishWeek } from '../src/steps/publish.js';
@@ -21,7 +21,7 @@ interface FakePost { id: string; status: string; text: string; dueAt: string | n
 class FakeBuffer {
   posts = new Map<string, FakePost>();
   createCalls = 0;
-  editCalls: { id: string; dueAt: string }[] = [];
+  editCalls: { id: string; dueAt?: string; text?: string }[] = [];
   failNextCreateWithTimeoutButCreate = false;
   down = false;
   private seq = 0;
@@ -41,10 +41,11 @@ class FakeBuffer {
       return json({ data: { createPost: { __typename: 'PostActionSuccess', post: this.posts.get(id) } } });
     }
     if (q.includes('editPost(')) {
-      const { id, dueAt } = body.variables.input;
+      const { id, dueAt, text } = body.variables.input;
       const p = this.posts.get(id)!;
-      p.dueAt = new Date(dueAt).toISOString();
-      this.editCalls.push({ id, dueAt });
+      if (dueAt !== undefined) p.dueAt = new Date(dueAt).toISOString();
+      if (text !== undefined) p.text = text;
+      this.editCalls.push({ id, dueAt, text });
       return json({ data: { editPost: { __typename: 'PostActionSuccess', post: p } } });
     }
     if (q.includes('posts(input:')) {
@@ -77,12 +78,15 @@ function makeCfg(): Config {
     r2: { bucket: 'b' }, apiUrl: undefined, apiToken: undefined, workDir: fs.mkdtempSync(path.join(os.tmpdir(), 'toaster-int-')), assetsDir: '', templateDir: '',
   };
 }
-function seed(store: JsonStore, n: number) {
+function seed(store: JsonStore, n: number, reviewEvery = 0) {
   const cands: Candidate[] = [];
   const prods: Production[] = [];
   for (let i = 0; i < n; i++) {
-    cands.push({ id: `C${i}`, source_platform: 'pixabay', source_id: `s${i}`, source_url: `https://pixabay.com/videos/${i}`, title: `clip ${i}`, status: 'produced', rights_status: 'cleared', rights_basis: 'pixabay_license', rights_evidence: 'x', category: 'funny_animals', updated_at: '', discovered_at: '' } as Candidate);
-    prods.push({ id: `P${i}`, candidate_id: `C${i}`, headline: `Headline ${i}`, commentary: 'c', caption_text: 'cap', hashtags: '["funny"]', voice_id: null, music_track: null, r2_key: `k${i}`, public_url: `https://media.example/${i}.mp4`, thumbnail_url: null, duration_sec: 10, render_log: null, created_at: `2026-11-0${(i % 9) + 1}T00:00:00Z`, updated_at: '' });
+    const review = reviewEvery > 0 && i % reviewEvery === 0;
+    cands.push(review
+      ? { id: `C${i}`, source_platform: 'reddit', source_id: `s${i}`, source_url: `https://www.reddit.com/r/funny/comments/s${i}/x/`, author: `u/poster${i}`, title: `viral clip ${i}`, status: 'produced', rights_status: 'transformation_review', rights_basis: null, rights_evidence: null, copyright_risk: 'low', copyright_risk_reasons: '["self-filmed phone footage"]', category: 'people_fails', final_score: 90 - i, updated_at: '', discovered_at: '' } as Candidate
+      : { id: `C${i}`, source_platform: 'pixabay', source_id: `s${i}`, source_url: `https://pixabay.com/videos/${i}`, title: `clip ${i}`, status: 'produced', rights_status: 'cleared', rights_basis: 'pixabay_license', rights_evidence: 'x', category: 'funny_animals', final_score: 70 - i, updated_at: '', discovered_at: '' } as Candidate);
+    prods.push({ id: `P${i}`, candidate_id: `C${i}`, headline: `Headline ${i}`, commentary: 'c', caption_text: 'cap', hashtags: '["funny"]', voice_id: null, music_track: null, r2_key: `k${i}`, public_url: `https://media.example/${i}.mp4`, thumbnail_url: null, duration_sec: 10, render_log: null, reuse_basis: review ? 'review' : 'cleared', created_at: `2026-11-0${(i % 9) + 1}T00:00:00Z`, updated_at: '' });
   }
   return Promise.all([store.upsertCandidates(cands), ...prods.map((p) => store.upsertProduction(p))]);
 }
@@ -194,4 +198,51 @@ test('publish refuses productions without a public URL and reports open slots', 
   assert.equal(report.complete, false);
   assert.equal(report.videos_missing, 21);
   assert.ok(report.shortage_reasons['render_ok_but_no_public_url (R2 not configured)'] >= 1);
+});
+
+test('transformation-review drafts are labelled, viral-first ordered, and the note is stripped only after the owner approves', async () => {
+  const cfg = makeCfg();
+  const store = new JsonStore(path.join(cfg.workDir, 'db.json'));
+  await seed(store, 4, 2); // C0, C2 review (reddit, higher score); C1, C3 cleared (pixabay)
+  const fake = new FakeBuffer();
+  const client = new BufferClient({ apiKey: 'k', fetchImpl: fake.fetch, maxRetries: 0 });
+  let clock = T0;
+  const now = () => new Date(clock);
+  const plan = buildWeekPlan(now(), cfg.tz, cfg.publishSlots);
+  const r = await publishWeek(cfg, store, { client, now, weeks: ['next'] });
+  assert.equal(r.created, 8);
+  const posts = await store.listPosts({ week: plan.week });
+  const first = posts.filter((p) => p.slot_at === plan.slots[0].slot_at);
+  assert.equal(first[0].production_id, 'P0', 'highest-scoring (viral) production fills the first slot');
+  const yt = first.find((p) => p.service === 'youtube')!;
+  assert.equal(yt.reuse_uncertain, true);
+  const draft = fake.posts.get(yt.buffer_post_id!)!;
+  assert.ok(draft.text.startsWith(REVIEW_BLOCK_START), 'review note is the first thing the owner sees');
+  assert.match(draft.text, /Reuse basis: NONE on file/);
+  assert.match(draft.text, /reddit\.com\/r\/funny/);
+  assert.match(draft.text, /not a license/);
+  assert.equal(draft.status, 'draft');
+  const clearedPost = posts.find((p) => p.production_id === 'P1')!;
+  assert.equal(clearedPost.reuse_uncertain, false);
+  assert.equal(fake.posts.get(clearedPost.buffer_post_id!)!.text.includes(REVIEW_BLOCK_START), false);
+
+  // owner approves the review draft on YouTube
+  draft.status = 'scheduled';
+  clock += 30 * 60_000;
+  const s = await syncBuffer(cfg, store, { client, now });
+  assert.equal(s.approved, 1);
+  assert.equal(s.errors.length, 0);
+  assert.equal(fake.posts.get(yt.buffer_post_id!)!.text.includes(REVIEW_BLOCK_START), false, 'note removed from the public caption');
+  assert.equal(fake.posts.get(yt.buffer_post_id!)!.text, yt.public_text);
+  const cand = (await store.getCandidate('C0'))!;
+  assert.equal(cand.rights_status, 'owner_reviewed');
+  assert.equal(cand.rights_basis, 'owner_transformative_use');
+  assert.match(cand.rights_evidence ?? '', /Owner approved Buffer youtube post/);
+  assert.equal((await store.listPosts()).find((p) => p.id === yt.id)!.review_block_stripped, true);
+  // the TikTok twin is still an unapproved draft with its note intact
+  const tt = first.find((p) => p.service === 'tiktok')!;
+  assert.ok(fake.posts.get(tt.buffer_post_id!)!.text.startsWith(REVIEW_BLOCK_START));
+  const { report } = await readinessReport(cfg, store, 'next', now());
+  assert.equal(report.videos_ready_review, 2);
+  assert.equal(report.videos_ready_cleared, 2);
 });

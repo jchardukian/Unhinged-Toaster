@@ -31,14 +31,13 @@ npm run toaster -- demo                # + ElevenLabs VO, Whisper captions, LLM 
 
 ## Guarantees
 - Nothing is published without approval: `BufferClient.createVideoPost` refuses `shareNow`/`shareNext` and refuses non-draft posts (publish guard, tested). Every post is a **draft** (or a Team-plan approval request).
-- Nothing is rendered without rights: `canProduce()` requires `cleared` + basis + evidence. No override.
+- Nothing is rendered outside the two documented paths: `productionBasis()` returns `cleared`, `review` or null; `review` is policy-gated (`TRANSFORMATION_REVIEW`, `MAX_COPYRIGHT_RISK`) and always labelled.
 - YouTube and TikTok approvals are tracked independently. A rejected TikTok draft never invalidates an approved YouTube draft.
 - A draft counts as rejected only after Buffer reports "not found" on two polls at least 10 minutes apart; transport errors never change state.
 - Draft creation is idempotent (Buffer is checked for a post already at that channel + instant before every create/retry).
 - Approved drafts are pinned back to their planned slot and the returned `dueAt` is verified.
 - The weekly readiness report (`toaster report`, Worker `/weeks/next/report`) never claims completion unless all 42 slots have live drafts; `run-weekly` exits 1 and raises an alert otherwise.
 
-## Honest status of footage sourcing
-Fully automated, commercially reusable sources today: Pixabay, Pexels, Internet Archive (stock-style, not viral fails).
-Proven-viral fails footage with redistribution rights only exists in paid licensing libraries (Jukin, ViralHog, Collab Clips,
-Newsflare) which are sales-led and cost roughly $9k–$27k/month at list price for 90 clips. See docs/SOURCES.md.
+## Footage sourcing – two labelled paths
+- **Cleared** (explicit basis + evidence): Pixabay, Pexels, Internet Archive PD/CC0/CC BY, YouTube CC BY with low provenance risk, creator permission, paid license.
+- **Transformation review** (no license on file; the viral path: Reddit, standard-license YouTube): rendered with real comedic edits (freeze-frame, punch-in zoom at the detected peak, slow-mo replay, reaction sticker, captions, original commentary), attributed, and drafted in Buffer **with a review note**. Approving a draft records the owner's decision (`owner_reviewed`, never "cleared") and the note is stripped from the public caption. `high` copyright-risk footage (broadcast/pro/music) is never produced. See docs/RIGHTS_POLICY.md and docs/SOURCES.md.

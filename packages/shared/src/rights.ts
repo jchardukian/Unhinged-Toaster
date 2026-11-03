@@ -1,16 +1,80 @@
-import { CLEARABLE_BASES, type Candidate, type RightsBasis, type SourcePlatform } from './types.js';
+import { CLEARABLE_BASES, type Candidate, type CopyrightRisk, type RightsBasis, type SourcePlatform } from './types.js';
 
-/**
- * Rights policy. The pipeline NEVER renders or drafts a candidate unless `canProduce` is true.
- * We do not infer permission. A candidate is cleared only when it has a recognised basis AND evidence.
- */
-export function canProduce(c: Pick<Candidate, 'rights_status' | 'rights_basis' | 'rights_evidence'>): boolean {
+export interface RightsPolicy {
+  /** Render + draft footage that has no explicit license as clearly labelled transformation-review candidates. */
+  transformationReview: boolean;
+  /** Highest copyright risk still allowed into transformation review (default: medium). */
+  maxCopyrightRisk?: CopyrightRisk;
+}
+export const DEFAULT_RIGHTS_POLICY: RightsPolicy = { transformationReview: true, maxCopyrightRisk: 'medium' };
+
+const RISK_RANK: Record<CopyrightRisk, number> = { low: 0, medium: 1, high: 2 };
+
+/** Explicitly cleared: recognised basis AND evidence. The only status that is ever described as "cleared". */
+export function isCleared(c: Pick<Candidate, 'rights_status' | 'rights_basis' | 'rights_evidence'>): boolean {
   return (
     c.rights_status === 'cleared' &&
     c.rights_basis != null &&
     CLEARABLE_BASES.includes(c.rights_basis) &&
     !!c.rights_evidence && c.rights_evidence.trim().length > 0
   );
+}
+
+/**
+ * On what basis may this candidate be produced?
+ *   'cleared'  explicit license / permission / PD
+ *   'review'   transformation review: no explicit license; drafted with a REVIEW label for the owner's decision
+ *   null       not producible
+ */
+export function productionBasis(
+  c: Pick<Candidate, 'rights_status' | 'rights_basis' | 'rights_evidence' | 'copyright_risk'>,
+  policy: RightsPolicy = DEFAULT_RIGHTS_POLICY,
+): 'cleared' | 'review' | null {
+  if (isCleared(c)) return 'cleared';
+  if (c.rights_status === 'owner_reviewed') return 'review';
+  if (c.rights_status === 'transformation_review' && policy.transformationReview) {
+    const risk = c.copyright_risk ?? 'medium';
+    if (RISK_RANK[risk] <= RISK_RANK[policy.maxCopyrightRisk ?? 'medium']) return 'review';
+  }
+  return null;
+}
+
+/** Backwards-compatible boolean used by the pipeline. */
+export function canProduce(c: Pick<Candidate, 'rights_status' | 'rights_basis' | 'rights_evidence' | 'copyright_risk'>, policy: RightsPolicy = DEFAULT_RIGHTS_POLICY): boolean {
+  return productionBasis(c, policy) !== null;
+}
+
+/** Recorded when the owner approves a transformation-review draft. Not a license; the owner's decision, with evidence. */
+export function ownerReviewedRights(c: Pick<Candidate, 'rights_status'>, evidence: string): Pick<Candidate, 'rights_status' | 'rights_basis' | 'rights_evidence'> | null {
+  if (c.rights_status !== 'transformation_review' && c.rights_status !== 'owner_reviewed') return null;
+  return { rights_status: 'owner_reviewed', rights_basis: 'owner_transformative_use', rights_evidence: evidence };
+}
+
+/** Text block prepended to a Buffer DRAFT whose footage has no explicit license. Stripped by the pipeline on approval. */
+export const REVIEW_BLOCK_START = '⚠️ REVIEW BEFORE APPROVING';
+export const REVIEW_BLOCK_END = '— end of review note —';
+export function reviewBlock(c: Pick<Candidate, 'author' | 'source_url' | 'source_platform' | 'copyright_risk' | 'copyright_risk_reasons' | 'rights_notes'>): string {
+  const reasons = safeList(c.copyright_risk_reasons);
+  return [
+    REVIEW_BLOCK_START,
+    `Reuse basis: NONE on file (transformation review). Source: ${c.source_platform} ${c.source_url}${c.author ? ` by ${c.author}` : ''}.`,
+    `Copyright risk: ${c.copyright_risk ?? 'unknown'}${reasons.length ? ` (${reasons.join('; ')})` : ''}.`,
+    'The video is transformed (cuts, zooms, freeze, replay, captions, original commentary) but transformation is not a license and does not guarantee fair use.',
+    'Approving this draft records YOUR decision to publish it on that basis; this note is removed automatically after approval. Delete the draft to reject it.',
+    REVIEW_BLOCK_END,
+  ].join('\n');
+}
+export function stripReviewBlock(text: string): string {
+  const start = text.indexOf(REVIEW_BLOCK_START);
+  const end = text.indexOf(REVIEW_BLOCK_END);
+  if (start < 0 || end < 0) return text;
+  return (text.slice(0, start) + text.slice(end + REVIEW_BLOCK_END.length)).replace(/^\s+/, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+export function hasReviewBlock(text: string | null | undefined): boolean {
+  return !!text && text.includes(REVIEW_BLOCK_START);
+}
+function safeList(json: string | null | undefined): string[] {
+  try { const v = JSON.parse(json ?? '[]'); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
 }
 
 /** Default rights status for each discovery adapter. Only sources with an explicit license auto-clear. */
@@ -38,7 +102,7 @@ export function initialRights(platform: SourcePlatform, meta: RightsMeta): Pick<
           rights_notes: 'Attribution required in description. Re-verify license at production time; uploader may change it. CC label is uploader-asserted, not verified ownership.',
         };
       }
-      return { rights_status: 'unknown', rights_basis: null, rights_evidence: null, rights_notes: 'Standard YouTube license: reuse requires the uploader\'s written permission.' };
+      return { rights_status: 'transformation_review', rights_basis: null, rights_evidence: null, rights_notes: 'Standard YouTube license: no reuse license on file. Eligible for transformation review only (owner decides per draft).' };
     case 'internet_archive': {
       const lic = (meta.license ?? '').toLowerCase();
       if (/publicdomain|zero\/1\.0|cc0/.test(lic)) return { rights_status: 'cleared', rights_basis: lic.includes('zero') || lic.includes('cc0') ? 'cc0' : 'public_domain', rights_evidence: `${meta.evidenceSuffix ?? ''} licenseurl=${meta.license}`, rights_notes: 'Internet Archive item license as declared by the uploader/collection.' };
@@ -52,7 +116,7 @@ export function initialRights(platform: SourcePlatform, meta: RightsMeta): Pick<
     case 'licensed_library':
       return { rights_status: 'cleared', rights_basis: 'licensed', rights_evidence: meta.license ?? 'license id missing', rights_notes: null };
     case 'reddit':
-      return { rights_status: 'unknown', rights_basis: null, rights_evidence: null, rights_notes: 'User-generated. Requires written permission from the original poster (OP) before use.' };
+      return { rights_status: 'transformation_review', rights_basis: null, rights_evidence: null, rights_notes: 'User-generated, no reuse license on file. Eligible for transformation review only (owner decides per draft). Attribution to the poster is always included.' };
     case 'manual':
     default:
       return { rights_status: 'unknown', rights_basis: null, rights_evidence: null, rights_notes: null };
@@ -67,6 +131,8 @@ export function attributionText(c: Pick<Candidate, 'author' | 'source_url' | 'ri
       return `Original video by ${who} (${c.source_url}), used under Creative Commons Attribution (CC BY 3.0). Edited: cropped, captioned, commentary added.`;
     case 'written_permission':
       return `Original video by ${who} (${c.source_url}), used with permission.`;
+    case 'owner_transformative_use':
+      return `Original clip by ${who} (${c.source_url}). Edits, captions and commentary by The Unhinged Toaster.`;
     case 'licensed':
       return `Original video by ${who}, licensed.`;
     case 'pexels_license':
@@ -79,7 +145,7 @@ export function attributionText(c: Pick<Candidate, 'author' | 'source_url' | 'ri
     case 'owned':
       return '';
     default:
-      return `Original video by ${who} (${c.source_url}).`;
+      return `Original clip by ${who} (${c.source_url}). Edits, captions and commentary by The Unhinged Toaster.`;
   }
 }
 
@@ -103,6 +169,7 @@ export function describeBasis(b: RightsBasis | null): string {
     case 'written_permission': return 'Written permission from creator';
     case 'licensed': return 'Paid license';
     case 'owned': return 'Owned footage';
+    case 'owner_transformative_use': return 'Owner-approved transformative use (no license)';
     default: return 'No basis recorded';
   }
 }

@@ -41,6 +41,9 @@ jobs:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           ENABLE_YOUTUBE_CC: ${{ vars.ENABLE_YOUTUBE_CC }}
+          ENABLE_YOUTUBE_TRANSFORM: ${{ vars.ENABLE_YOUTUBE_TRANSFORM }}
+          TRANSFORMATION_REVIEW: ${{ vars.TRANSFORMATION_REVIEW }}
+          MAX_COPYRIGHT_RISK: ${{ vars.MAX_COPYRIGHT_RISK }}
           DISCOVERY_SOURCES: ${{ vars.DISCOVERY_SOURCES }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

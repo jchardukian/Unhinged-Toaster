@@ -1,4 +1,4 @@
-import { ccProvenanceRisk, ulid, initialRights, type Candidate, type ContentCategory, type SourcePlatform } from '@toaster/shared';
+import { ccProvenanceRisk, ulid, initialRights, type Candidate, type ContentCategory, type SourceAdapter, type SourcePlatform } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { withRetry } from '../retry.js';
 
@@ -11,7 +11,7 @@ import { withRetry } from '../retry.js';
  * Discovery only, needs creator permission:  reddit
  */
 
-export interface DiscoverOptions { sources: SourcePlatform[]; limitPerSource: number }
+export interface DiscoverOptions { sources: SourceAdapter[]; limitPerSource: number }
 
 export async function discoverAll(cfg: Config, opts: DiscoverOptions): Promise<Candidate[]> {
   const out: Candidate[] = [];
@@ -23,6 +23,7 @@ export async function discoverAll(cfg: Config, opts: DiscoverOptions): Promise<C
         : s === 'pexels' ? await discoverPexels(cfg, opts.limitPerSource)
         : s === 'pixabay' ? await discoverPixabay(cfg, opts.limitPerSource)
         : s === 'internet_archive' ? await discoverInternetArchive(cfg, opts.limitPerSource)
+        : s === 'youtube_trending' ? await discoverYouTubeTrending(cfg, opts.limitPerSource)
         : [];
       log.info(`discover:${s} -> ${found.length} candidates`);
       out.push(...found);
@@ -33,12 +34,13 @@ export async function discoverAll(cfg: Config, opts: DiscoverOptions): Promise<C
   return out;
 }
 
-function base(platform: SourcePlatform, now: string): Pick<Candidate, 'id' | 'discovered_at' | 'updated_at' | 'status' | 'status_reason' | 'heuristic_score' | 'llm_score' | 'final_score' | 'llm_rationale' | 'safety_flags' | 'phash' | 'duplicate_of' | 'attribution_text' | 'category' | 'source_platform'> {
+function base(platform: SourcePlatform, now: string): Pick<Candidate, 'id' | 'discovered_at' | 'updated_at' | 'status' | 'status_reason' | 'heuristic_score' | 'llm_score' | 'final_score' | 'llm_rationale' | 'safety_flags' | 'phash' | 'duplicate_of' | 'attribution_text' | 'category' | 'source_platform' | 'copyright_risk' | 'copyright_risk_reasons'> {
   return {
     id: ulid(), discovered_at: now, updated_at: now, status: 'discovered', status_reason: null,
     heuristic_score: null, llm_score: null, final_score: null, llm_rationale: null, safety_flags: null,
     phash: null, duplicate_of: null, attribution_text: null, category: null, source_platform: platform,
-  };
+    copyright_risk: null, copyright_risk_reasons: null,
+  } as ReturnType<typeof base>;
 }
 
 /** Search terms per content category, shared by the stock-style sources. */
@@ -294,6 +296,44 @@ export async function discoverYouTube(cfg: Config, limit: number): Promise<Candi
         title: item.snippet.title, description: item.snippet.description?.slice(0, 500) ?? null, category, duration_sec: dur, width: null, height: null,
         published_at: item.snippet.publishedAt, views: num(item.statistics.viewCount), likes: num(item.statistics.likeCount), comments: num(item.statistics.commentCount), shares: null, engagement_velocity: null,
         ...initialRights('youtube', { license: item.status.license, provenanceRisk: prov.risk, provenanceReasons: prov.reasons, evidenceSuffix: `; channel ${item.snippet.channelId}` }),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * YouTube most-popular chart (Comedy 23, Pets & Animals 15, Entertainment 24): standard-license uploads that go
+ * straight to transformation review. Opt-in (ENABLE_YOUTUBE_TRANSFORM) because fetching the file uses yt-dlp.
+ */
+export async function discoverYouTubeTrending(cfg: Config, limit: number): Promise<Candidate[]> {
+  if (!cfg.youtubeKey) throw new Error('YOUTUBE_API_KEY not set');
+  if (!cfg.enableYoutubeTransform) throw new Error('YouTube trending source disabled: set ENABLE_YOUTUBE_TRANSFORM=true (see docs/SOURCES.md)');
+  const now = new Date().toISOString();
+  const out: Candidate[] = [];
+  for (const [categoryId, category] of [['23', 'people_fails'], ['15', 'funny_animals'], ['24', 'unbelievable']] as [string, ContentCategory][]) {
+    const sp = new URLSearchParams({ part: 'snippet,statistics,contentDetails,status', chart: 'mostPopular', videoCategoryId: categoryId, regionCode: 'US', maxResults: String(Math.min(50, limit)), key: cfg.youtubeKey });
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${sp}`);
+    if (!res.ok) { log.warn(`youtube mostPopular ${categoryId} -> ${res.status}`); continue; }
+    const v = (await res.json()) as { items: YtVideo[] };
+    for (const item of v.items) {
+      const dur = isoDurationSec(item.contentDetails.duration);
+      if (dur < 4 || dur > 60) continue; // shorts only; no automatic sub-clipping of long videos
+      if (item.contentDetails.contentRating?.ytRating === 'ytAgeRestricted') continue;
+      const prov = ccProvenanceRisk({ title: item.snippet.title, description: item.snippet.description, channelTitle: item.snippet.channelTitle, durationSec: dur });
+      const rights = item.status.license === 'creativeCommon'
+        ? initialRights('youtube', { license: 'creativeCommon', provenanceRisk: prov.risk, provenanceReasons: prov.reasons, evidenceSuffix: `; channel ${item.snippet.channelId}` })
+        : initialRights('youtube', { license: 'youtube' });
+      out.push({
+        ...base('youtube', now),
+        source_id: item.id, source_url: `https://www.youtube.com/watch?v=${item.id}`, media_url: null,
+        author: item.snippet.channelTitle, author_url: `https://www.youtube.com/channel/${item.snippet.channelId}`,
+        title: item.snippet.title, description: item.snippet.description?.slice(0, 500) ?? null, category, duration_sec: dur, width: null, height: null,
+        published_at: item.snippet.publishedAt, views: num(item.statistics.viewCount), likes: num(item.statistics.likeCount), comments: num(item.statistics.commentCount), shares: null, engagement_velocity: null,
+        ...rights,
+        // provenance signals double as copyright-risk hints for the reviewer; the LLM scorer refines them
+        copyright_risk: prov.risk === 'high' ? 'high' : null,
+        copyright_risk_reasons: prov.reasons.length ? JSON.stringify(prov.reasons) : null,
       });
     }
   }

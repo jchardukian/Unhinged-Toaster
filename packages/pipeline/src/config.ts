@@ -43,6 +43,9 @@ export interface Config {
   approvalMode: 'draft' | 'needs_approval';
   youtubeKey: string | undefined;
   enableYoutubeCc: boolean;
+  enableYoutubeTransform: boolean;
+  transformationReview: boolean;
+  maxCopyrightRisk: 'low' | 'medium' | 'high';
   sources: string | undefined;
   reddit: { clientId?: string; clientSecret?: string; username?: string; password?: string; userAgent: string };
   pexelsKey: string | undefined;
@@ -77,6 +80,9 @@ export function loadConfig(): Config {
     approvalMode: (e.BUFFER_APPROVAL_MODE as 'draft' | 'needs_approval') ?? 'draft',
     youtubeKey: e.YOUTUBE_API_KEY,
     enableYoutubeCc: e.ENABLE_YOUTUBE_CC === 'true',
+    enableYoutubeTransform: e.ENABLE_YOUTUBE_TRANSFORM === 'true',
+    transformationReview: e.TRANSFORMATION_REVIEW !== 'false',
+    maxCopyrightRisk: (['low', 'medium', 'high'].includes(e.MAX_COPYRIGHT_RISK ?? '') ? e.MAX_COPYRIGHT_RISK : 'medium') as 'low' | 'medium' | 'high',
     sources: e.DISCOVERY_SOURCES || undefined,
     reddit: {
       clientId: e.REDDIT_CLIENT_ID, clientSecret: e.REDDIT_CLIENT_SECRET, username: e.REDDIT_USERNAME, password: e.REDDIT_PASSWORD,

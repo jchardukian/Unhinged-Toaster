@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { buildWeekPlan, canProduce, permissionRequestMessage, type Candidate, type RightsBasis, type SourcePlatform } from '@toaster/shared';
+import { buildWeekPlan, canProduce, permissionRequestMessage, type Candidate, type RightsBasis, type SourceAdapter } from '@toaster/shared';
 import { alert } from './alerts.js';
 import { loadConfig, log, repoRoot, type Config } from './config.js';
 import { makeStore, type Store } from './store.js';
@@ -23,7 +23,7 @@ Daily / weekly automation
   report [--week current|next] [--json]   weekly readiness report (21 targets, funnel, shortages, blockers)
 
 Individual steps
-  discover [--sources pixabay,pexels,internet_archive,youtube,reddit] [--limit 50]
+  discover [--sources reddit,youtube_trending,youtube,pixabay,pexels,internet_archive] [--limit 50]
   score
   produce [--count N | --id CANDIDATE_ID]
   publish [--dry-run]
@@ -54,7 +54,7 @@ async function main() {
       return;
     case 'demo': return runDemo(cfg, flags);
     case 'discover': {
-      const sources = String(flags.sources ?? defaultSources(cfg)).split(',').filter(Boolean) as SourcePlatform[];
+      const sources = String(flags.sources ?? defaultSources(cfg)).split(',').filter(Boolean) as SourceAdapter[];
       await discoverInto(cfg, store, sources, Number(flags.limit ?? 50));
       return;
     }
@@ -95,7 +95,7 @@ async function main() {
       return;
     }
     case 'run-daily': {
-      await discoverInto(cfg, store, defaultSources(cfg).split(',').filter(Boolean) as SourcePlatform[], Number(flags.limit ?? 50));
+      await discoverInto(cfg, store, defaultSources(cfg).split(',').filter(Boolean) as SourceAdapter[], Number(flags.limit ?? 50));
       await scoreAll(cfg, store);
       const stock = Number(flags.stock ?? 10);
       const have = await produceUntil(cfg, store, stock);
@@ -119,7 +119,7 @@ async function main() {
         if (last.failed === 0 && last.openSlots === 0) break;
         if (last.failed === 0 && last.openSlots > 0) {
           // open slots with no failures means we ran out of footage; try discovering once more then stop looping
-          if (round === 1) { await discoverInto(cfg, store, defaultSources(cfg).split(',').filter(Boolean) as SourcePlatform[], 50); await scoreAll(cfg, store); continue; }
+          if (round === 1) { await discoverInto(cfg, store, defaultSources(cfg).split(',').filter(Boolean) as SourceAdapter[], 50); await scoreAll(cfg, store); continue; }
           break;
         }
       }
@@ -167,7 +167,7 @@ async function main() {
   }
 }
 
-async function discoverInto(cfg: Config, store: Store, sources: SourcePlatform[], limit: number): Promise<number> {
+async function discoverInto(cfg: Config, store: Store, sources: SourceAdapter[], limit: number): Promise<number> {
   if (sources.length === 0) { log.warn('no discovery sources configured (set PIXABAY_API_KEY / PEXELS_API_KEY, or DISCOVERY_SOURCES)'); return 0; }
   const found = await discoverAll(cfg, { sources, limitPerSource: limit });
   const known = new Set((await store.dedupeIndex()).map((e) => e.source_url.toLowerCase()));
@@ -177,15 +177,19 @@ async function discoverInto(cfg: Config, store: Store, sources: SourcePlatform[]
   return fresh.length;
 }
 
-/** Automatically usable sources first; YouTube only when explicitly enabled; Reddit is discovery-only (needs permission). */
+/**
+ * Viral-first: Reddit (transformation review) and YouTube (when enabled) before the stock-style fillers.
+ * Everything without an explicit license is drafted with a review note; nothing is auto-classified as cleared.
+ */
 function defaultSources(cfg: Config): string {
   if (cfg.sources) return cfg.sources;
   const s: string[] = [];
+  if (cfg.reddit.clientId && cfg.transformationReview) s.push('reddit');
+  if (cfg.youtubeKey && cfg.enableYoutubeTransform && cfg.transformationReview) s.push('youtube_trending');
+  if (cfg.youtubeKey && cfg.enableYoutubeCc) s.push('youtube');
   if (cfg.pixabayKey) s.push('pixabay');
   if (cfg.pexelsKey) s.push('pexels');
   s.push('internet_archive');
-  if (cfg.youtubeKey && cfg.enableYoutubeCc) s.push('youtube');
-  if (cfg.reddit.clientId) s.push('reddit');
   return s.join(',');
 }
 
@@ -211,7 +215,9 @@ function doctor(cfg: Config) {
   check('Pixabay key (auto-clearable source)', !!cfg.pixabayKey, 'PIXABAY_API_KEY (free)');
   check('Pexels key (auto-clearable source)', !!cfg.pexelsKey, 'PEXELS_API_KEY (free)');
   check('YouTube CC source', !!cfg.youtubeKey && cfg.enableYoutubeCc, 'YOUTUBE_API_KEY + ENABLE_YOUTUBE_CC=true (read docs/SOURCES.md first)');
-  check('Reddit app (discovery only, needs permission)', !!cfg.reddit.clientId, 'REDDIT_CLIENT_ID/SECRET');
+  check('Reddit app (viral source, transformation review)', !!cfg.reddit.clientId, 'REDDIT_CLIENT_ID/SECRET (free script app)');
+  check('YouTube trending (transformation review)', !!cfg.youtubeKey && cfg.enableYoutubeTransform, 'YOUTUBE_API_KEY + ENABLE_YOUTUBE_TRANSFORM=true');
+  check(`Transformation review ${cfg.transformationReview ? 'ON' : 'OFF'} (max risk ${cfg.maxCopyrightRisk})`, true);
   check('R2 credentials', !!(cfg.r2.accountId && cfg.r2.accessKeyId && cfg.r2.publicBaseUrl), 'R2_* vars; Buffer needs a public video URL');
   check('Control-plane API', !!(cfg.apiUrl && cfg.apiToken), 'TOASTER_API_URL/TOKEN (falls back to work/db.json)');
   check('Alert webhook', !!process.env.ALERT_WEBHOOK_URL, 'ALERT_WEBHOOK_URL (optional; GitHub issues + step summary still work in Actions)');

@@ -19,6 +19,8 @@ export interface ReadinessReport {
     errored: number;              // state error or create failures
   };
   videos_ready: number;           // distinct productions with a live post this week
+  videos_ready_cleared: number;   // ...of which footage has an explicit reuse basis
+  videos_ready_review: number;    // ...of which footage is in transformation review (owner decides per draft)
   videos_missing: number;         // target_videos - videos_ready (>= 0)
   missing_slots: { slot_at: string; service: string }[];
   shortage_reasons: Record<string, number>;
@@ -38,7 +40,9 @@ export function buildReadinessReport(input: {
   const live = posts.filter((p) => p.state !== 'deleted' && p.state !== 'error' && p.buffer_post_id);
   const taken = new Set(live.map((p) => `${p.slot_at}|${p.service}`));
   const missing_slots = plan.slots.filter((s) => !taken.has(`${s.slot_at}|${s.service}`));
-  const videosReady = new Set(live.map((p) => p.production_id)).size;
+  const readyProdIds = new Set(live.map((p) => p.production_id));
+  const videosReady = readyProdIds.size;
+  const reviewProdIds = new Set(live.filter((p) => p.reuse_uncertain).map((p) => p.production_id));
   const targetVideos = plan.slots.length / 2;
 
   const scoredPass = candidates.filter((c) => !['discovered', 'rejected_score', 'rejected_safety', 'rejected_duplicate'].includes(c.status)).length;
@@ -56,7 +60,7 @@ export function buildReadinessReport(input: {
       case 'failed': bump(`render_failed:${(c.status_reason ?? 'unknown').slice(0, 60)}`); break;
       case 'scored':
       case 'ready':
-        if (c.rights_status !== 'cleared') bump(`rights:${c.rights_status}`); break;
+        if (c.rights_status !== 'cleared' && c.rights_status !== 'transformation_review' && c.rights_status !== 'owner_reviewed') bump(`rights:${c.rights_status}`); break;
       default: break;
     }
   }
@@ -70,8 +74,10 @@ export function buildReadinessReport(input: {
     if (unposted > 0) blockers.push(`${unposted} rendered video(s) not yet drafted into Buffer (publish step did not run or failed)`);
     const clearedUnrendered = candidates.filter((c) => c.rights_status === 'cleared' && ['scored', 'ready'].includes(c.status)).length;
     if (clearedUnrendered > 0) blockers.push(`${clearedUnrendered} cleared candidate(s) waiting to be rendered`);
-    const uncleared = candidates.filter((c) => c.rights_status !== 'cleared' && c.rights_status !== 'denied' && ['scored', 'ready'].includes(c.status)).length;
+    const uncleared = candidates.filter((c) => !['cleared', 'denied', 'transformation_review', 'owner_reviewed'].includes(c.rights_status) && ['scored', 'ready'].includes(c.status)).length;
     if (uncleared > 0) blockers.push(`${uncleared} good candidate(s) blocked on footage rights (no automated clearance available for their source)`);
+    const highRisk = candidates.filter((c) => c.copyright_risk === 'high').length;
+    if (highRisk > 0) blockers.push(`${highRisk} candidate(s) excluded as high copyright risk (broadcast/pro/music content)`);
     if (candidates.length === 0) blockers.push('no candidates discovered: discovery sources are not configured or returned nothing');
     if (videosMissing > 0 && blockers.length === 0) blockers.push('not enough eligible footage from the configured sources');
   }
@@ -94,6 +100,8 @@ export function buildReadinessReport(input: {
       errored: posts.filter((p) => p.state === 'error').length,
     },
     videos_ready: videosReady,
+    videos_ready_cleared: videosReady - reviewProdIds.size,
+    videos_ready_review: reviewProdIds.size,
     videos_missing: videosMissing,
     missing_slots,
     shortage_reasons: reasons,
@@ -120,7 +128,7 @@ export function formatReadinessMarkdown(r: ReadinessReport): string {
     `| Published | ${f.published} |`,
     `| Rejected by owner | ${f.rejected} |`,
     `| Errors | ${f.errored} |`,
-    `| **Videos ready** | **${r.videos_ready} / ${r.target_videos}** |`,
+    `| **Videos ready** | **${r.videos_ready} / ${r.target_videos}** (${r.videos_ready_cleared} with explicit reuse basis, ${r.videos_ready_review} transformation-review ⚠️) |`,
     `| Missing slots | ${r.missing_slots.length} |`,
   ];
   if (Object.keys(r.shortage_reasons).length) {
@@ -130,6 +138,9 @@ export function formatReadinessMarkdown(r: ReadinessReport): string {
   if (r.blockers.length) {
     lines.push('', '**Blockers**');
     for (const b of r.blockers) lines.push(`- ${b}`);
+  }
+  if (r.videos_ready_review > 0) {
+    lines.push('', `⚠️ ${r.videos_ready_review} draft video(s) use footage WITHOUT an explicit reuse license. Each carries a review note in Buffer; approving is your decision and records it. Transformation is not a license.`);
   }
   if (r.missing_slots.length) {
     lines.push('', `**Unfilled slots** (first ${Math.min(10, r.missing_slots.length)})`);

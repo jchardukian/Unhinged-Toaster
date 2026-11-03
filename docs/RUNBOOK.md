@@ -11,7 +11,8 @@
 | pixabay.com/api/docs | free key | `PIXABAY_API_KEY` (auto-cleared source) |
 | pexels.com/api | free key | `PEXELS_API_KEY` (auto-cleared source) |
 | Google Cloud console | YouTube Data API v3 | `YOUTUBE_API_KEY` + `ENABLE_YOUTUBE_CC=true` (opt-in, see docs/SOURCES.md) |
-| reddit.com/prefs/apps | "script" app | `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`, `REDDIT_PASSWORD` (discovery only; needs creator permission) |
+| reddit.com/prefs/apps | free "script" app | `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`, `REDDIT_PASSWORD` — **primary viral source** (transformation review) |
+| – | policy | `TRANSFORMATION_REVIEW=true`, `MAX_COPYRIGHT_RISK=medium`; optional `ENABLE_YOUTUBE_TRANSFORM=true` (YouTube trending, yt-dlp) |
 | Slack/Discord (optional) | incoming webhook | `ALERT_WEBHOOK_URL` |
 | Cloudflare | R2 API token (Object Read & Write) | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
 
@@ -62,7 +63,7 @@ npm run toaster -- status
 Without `TOASTER_API_URL` the CLI uses `work/db.json`, so everything can be exercised locally first.
 
 ## Weekly operation
-- Sunday morning: open Buffer → Drafts. 42 drafts (21 per channel) titled with the headline. Approve ("Add to queue" or "Schedule") or delete.
+- Sunday morning: open Buffer → Drafts. 42 drafts (21 per channel) titled with the headline. Drafts whose footage has no license on file begin with "⚠️ REVIEW BEFORE APPROVING" (source, copyright risk, what approving means). Approve ("Add to queue" or "Schedule") or delete. The note is removed from the caption automatically after approval.
 - Nothing else. A deletion is confirmed after two polls ≥ 10 min apart, then a replacement is rendered and drafted into the same slot (Worker: ~30–60 min; Actions fallback: ~2–4 h). Replacements are new drafts, so they appear in the Drafts tab for your next look.
 - Readiness: `GET https://<worker>/weeks/next/report?format=md` (Bearer token), or the step summary of the weekly GitHub Actions run, or `npm run toaster -- report`.
 - Alerts: the weekly run fails (red, e-mail from GitHub) and opens/updates a `[toaster] readiness <week>` issue when fewer than 21 videos are drafted; `ALERT_WEBHOOK_URL` additionally posts to Slack/Discord.

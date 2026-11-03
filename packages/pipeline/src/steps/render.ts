@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { escapeDrawtext, wrapText } from '@toaster/shared';
+import { escapeDrawtext, planEdit, wrapText, type EditTimeline } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { assColor, buildAss, type Word } from './captions.js';
 import { ffprobe, run } from './media.js';
@@ -26,13 +26,14 @@ export interface RenderJob {
   headline: string;
   commentary: string;
   voPath: string | null;          // mp3 of the commentary (optional)
-  words: Word[] | null;           // transcript words for captions (optional)
+  words: Word[] | null;           // transcript words for captions (optional, source time)
   musicPath: string | null;
   outPath: string;
   workDir: string;
+  timeline?: EditTimeline;        // clip-specific comedic edit plan (optional: plain template when absent)
 }
 
-export interface RenderResult { outPath: string; durationSec: number; thumbnailPath: string; command: string[] }
+export interface RenderResult { outPath: string; durationSec: number; thumbnailPath: string; command: string[]; editedClipSec: number }
 
 export function loadTemplate(cfg: Config): Template {
   const t = JSON.parse(fs.readFileSync(path.join(cfg.templateDir, 'template.json'), 'utf8')) as Template;
@@ -66,15 +67,21 @@ export function pickMusic(cfg: Config, category: string | null): string | null {
 
 /**
  * Compose the branded 1080x1920 short with a single FFmpeg invocation.
- * Layers (bottom -> top): animated background, clip shadow, clip, yellow frame, headline box + text,
- * captions (ASS), commentary box (intro/outro), watermark, mascot.
+ * Clip chain (comedic edit): [A] -> freeze-frame + text -> [B with punch-in zoom at the peak] -> slow-mo replay -> outro freeze.
+ * Layers (bottom -> top): animated background, clip shadow, edited clip, yellow frame, headline box + text,
+ * captions (ASS, remapped to the edited timeline), reaction sticker, commentary box (outro), watermark, mascot.
  */
 export async function renderShort(cfg: Config, t: Template, job: RenderJob): Promise<RenderResult> {
   const probe = await ffprobe(job.clipPath);
   const W = t.canvas.width, H = t.canvas.height, fps = t.canvas.fps;
-  const clipDur = Math.min(probe.duration, t.limits.maxDurationSec - (t.commentary.position === 'outro' ? t.commentary.outroSeconds : 0));
   const outro = t.commentary.position === 'outro' ? t.commentary.outroSeconds : 0;
-  const total = clipDur + outro;
+  const maxClip = t.limits.maxDurationSec - outro;
+  const srcDur = Math.min(probe.duration, maxClip);
+  const tl: EditTimeline = job.timeline ?? planEdit({ sourceDuration: srcDur, peak: null, maxTotal: maxClip, style: 'light' });
+  const b = tl.beats;
+  const D = Math.min(srcDur, tl.sourceDuration);
+  const editedDur = tl.editedDuration;
+  const total = editedDur + outro;
 
   // fit clip into the frame
   const scale = Math.min(t.clip.maxWidth / probe.width, t.clip.maxHeight / probe.height);
@@ -107,11 +114,12 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const iVo = job.voPath ? add('-i', job.voPath) : -1;
   const iMusic = job.musicPath ? add('-stream_loop', '-1', '-i', job.musicPath) : -1;
 
-  // ---------- captions file
+  // ---------- captions file (source time -> edited time; drop words inside the replay since it is a repeat)
   let assFile: string | null = null;
   if (job.words && job.words.length) {
+    const words = job.words.filter((w) => w.start < D).map((w) => ({ ...w, start: tl.map(w.start), end: tl.map(Math.min(w.end, D)) }));
     assFile = path.join(job.workDir, 'captions.ass');
-    fs.writeFileSync(assFile, buildAss(job.words, {
+    fs.writeFileSync(assFile, buildAss(words, {
       fontName: fontFamilyName(font), fontSize: t.captions.fontSize, playResX: W, playResY: H,
       marginV: H - (cy + ch) + t.captions.bottomPadding,
       primary: assColor(t.captions.activeColor), secondary: assColor(t.captions.idleColor), outline: assColor(t.captions.outlineColor),
@@ -123,8 +131,37 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   if (useBgLoop) f.push(`[${iBg}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${fps},format=rgba[bg0]`);
   else f.push(`[${iBg}:v]rotate=t*0.10:ow=${W}:oh=${H}:c=black,scale=w=${W}*(1.02+0.02*sin(t*1.3)):h=${H}*(1.02+0.02*sin(t*1.3)):eval=frame,crop=${W}:${H},fps=${fps},format=rgba[bg0]`);
   f.push(`[bg0]drawbox=x=${cx - fw + so}:y=${cy - fw + so}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.black}@0.85:t=fill[bg1]`);
+
+  // --- edited clip chain
+  f.push(`[${iClip}:v]scale=${cw}:${ch}:flags=lanczos,setsar=1,fps=${fps},trim=0:${D.toFixed(3)},setpts=PTS-STARTPTS[c0]`);
+  const splits = ['cB'];
+  if (b.freeze) splits.unshift('cA');
+  if (b.replay) splits.push('cR');
+  if (splits.length > 1) f.push(`[c0]split=${splits.length}${splits.map((s) => `[${s}]`).join('')}`);
+  else f.push('[c0]null[cB]');
+  let mainLabel: string;
+  if (b.freeze) {
+    const tf = b.freeze.at;
+    const freezeTxt = `drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(b.freeze.text)}':fontsize=${Math.round(cw / 9)}:fontcolor=${t.colors.yellow}:borderw=10:bordercolor=${t.colors.black}:x=(w-text_w)/2:y=h*0.72-text_h/2:enable='gte(t,${tf.toFixed(3)})'`;
+    f.push(`[cA]trim=0:${tf.toFixed(3)},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${b.freeze.duration},${freezeTxt},setsar=1[segA]`);
+    f.push(`[cB]trim=${tf.toFixed(3)}:${D.toFixed(3)},setpts=PTS-STARTPTS${punchIn(b, tf, fps, cw, ch)}[segB]`);
+    f.push(`[segA][segB]concat=n=2:v=1:a=0[main]`);
+    mainLabel = 'main';
+  } else {
+    f.push(`[cB]setpts=PTS-STARTPTS${punchIn(b, 0, fps, cw, ch)}[main]`);
+    mainLabel = 'main';
+  }
+  if (b.replay) {
+    const z = b.replay.zoom;
+    const zw = even(Math.round(cw * z)), zh = even(Math.round(ch * z));
+    const label = `drawtext=fontfile='${esc(font)}':text='REPLAY':fontsize=${Math.round(cw / 16)}:fontcolor=${t.colors.white}:box=1:boxcolor=${t.colors.red}:boxborderw=12:x=28:y=28`;
+    f.push(`[cR]trim=${b.replay.from.toFixed(3)}:${b.replay.to.toFixed(3)},setpts=(PTS-STARTPTS)/${b.replay.speed},scale=${zw}:${zh},crop=${cw}:${ch},setsar=1,${label}[rep]`);
+    f.push(`[${mainLabel}][rep]concat=n=2:v=1:a=0[edited0]`);
+    mainLabel = 'edited0';
+  }
   const padClip = outro > 0 ? `,tpad=stop_mode=clone:stop_duration=${outro}` : '';
-  f.push(`[${iClip}:v]scale=${cw}:${ch}:flags=lanczos,setsar=1,fps=${fps}${padClip}[clip]`);
+  f.push(`[${mainLabel}]setpts=PTS-STARTPTS${padClip}[clip]`);
+
   f.push(`[bg1][clip]overlay=x=${cx}:y=${cy}:shortest=0[v1]`);
   f.push(`[v1]drawbox=x=${cx - fw}:y=${cy - fw}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.yellow}:t=${fw}[v2]`);
 
@@ -149,9 +186,17 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     cur = 'cap';
   }
 
+  // reaction sticker at the peak (pops in with an alpha ramp), on the composite so it can overhang the frame
+  if (b.sticker) {
+    const ts = tl.map(b.sticker.at);
+    const te = ts + b.sticker.duration;
+    f.push(`[${cur}]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(b.sticker.text)}':fontsize=${Math.round(W / 7)}:fontcolor=${t.colors.yellow}:borderw=14:bordercolor=${t.colors.black}:box=1:boxcolor=${t.colors.red}@0.92:boxborderw=26:x=(w-text_w)/2:y=${Math.round(cy + ch * 0.30)}:alpha='min(1,(t-${ts.toFixed(3)})*8)':enable='between(t,${ts.toFixed(3)},${te.toFixed(3)})'[stk]`);
+    cur = 'stk';
+  }
+
   // commentary text (shown while VO plays)
   const cLines = wrapText(job.commentary, t.commentary.maxCharsPerLine, t.commentary.maxLines ?? 3);
-  const enable = outro > 0 ? `gte(t,${clipDur.toFixed(2)})` : `lt(t,${Math.min(clipDur, 3.5).toFixed(2)})`;
+  const enable = outro > 0 ? `gte(t,${editedDur.toFixed(2)})` : `lt(t,${Math.min(editedDur, 3.5).toFixed(2)})`;
   cLines.forEach((line, i) => {
     const nxt = `c${i}`;
     f.push(`[${cur}]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(line)}':fontsize=${t.commentary.fontSize}:fontcolor=${t.commentary.textColor}:box=1:boxcolor=${t.commentary.boxColor}:boxborderw=14:x=(w-text_w)/2-120:y=${t.commentary.y + i * Math.round(t.commentary.fontSize * 1.25)}:enable='${enable}'[${nxt}]`);
@@ -163,10 +208,11 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   f.push(`[${cur}][logo]overlay=x=${t.watermark.x}:y=${t.watermark.y}[wm0]`);
   f.push(`[wm0]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(t.handle)}':fontsize=${t.watermark.fontSize}:fontcolor=${t.colors.white}:borderw=4:bordercolor=${t.colors.black}:x=${t.watermark.x + t.watermark.logoWidth + 14}:y=${t.watermark.y + Math.round(t.watermark.logoWidth / 2 - t.watermark.fontSize / 2)}[wm]`);
 
-  // mascot (bobbing); optional "shout" pose while the commentary plays
+  // mascot (bobbing); optional "shout" pose while the commentary plays and at the sticker moment
   f.push(`[${iMascot}:v]scale=${t.mascot.width}:-1[masc]`);
   if (iShout >= 0) {
-    const shoutEnable = outro > 0 ? `gte(t,${clipDur.toFixed(2)})` : `lt(t,${Math.min(clipDur, 3.5).toFixed(2)})`;
+    const stickerWin = b.sticker ? `+between(t,${tl.map(b.sticker.at).toFixed(3)},${(tl.map(b.sticker.at) + b.sticker.duration).toFixed(3)})` : '';
+    const shoutEnable = `(${outro > 0 ? `gte(t,${editedDur.toFixed(2)})` : `lt(t,${Math.min(editedDur, 3.5).toFixed(2)})`}${stickerWin})`;
     f.push(`[${iShout}:v]scale=${t.mascot.width}:-1[shout]`);
     f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame:enable='not(${shoutEnable})'[m1]`);
     f.push(`[m1][shout]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude * 1.6}*sin(t*${t.mascot.bobSpeed * 2.5}):eval=frame:enable='${shoutEnable}':format=auto,format=yuv420p[vout]`);
@@ -174,18 +220,35 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame:format=auto,format=yuv420p[vout]`);
   }
 
-  // ---------- audio graph
+  // ---------- audio graph (mirrors the edit: freeze = silence, replay = slowed original, outro = padding)
   const aParts: string[] = [];
   const mixIn: string[] = [];
-  if (probe.hasAudio) {
-    aParts.push(`[${iClip}:a]aresample=48000,apad=pad_dur=${outro}[ca]`);
-    mixIn.push('[ca]');
+  if (probe.hasAudio && !b.muteSource) aParts.push(`[${iClip}:a]aresample=48000,atrim=0:${D.toFixed(3)},asetpts=PTS-STARTPTS[a0]`);
+  else aParts.push(`anullsrc=r=48000:cl=stereo,atrim=0:${D.toFixed(3)},asetpts=PTS-STARTPTS[a0]`);
+  const asplits = ['aB'];
+  if (b.freeze) asplits.unshift('aA');
+  if (b.replay) asplits.push('aR');
+  if (asplits.length > 1) aParts.push(`[a0]asplit=${asplits.length}${asplits.map((s) => `[${s}]`).join('')}`);
+  else aParts.push('[a0]anull[aB]');
+  let amain: string;
+  if (b.freeze) {
+    aParts.push(`[aA]atrim=0:${b.freeze.at.toFixed(3)},asetpts=PTS-STARTPTS,apad=pad_dur=${b.freeze.duration}[aA1]`);
+    aParts.push(`[aB]atrim=${b.freeze.at.toFixed(3)}:${D.toFixed(3)},asetpts=PTS-STARTPTS[aB1]`);
+    aParts.push(`[aA1][aB1]concat=n=2:v=0:a=1[amain]`);
+    amain = 'amain';
   } else {
-    aParts.push(`anullsrc=r=48000:cl=stereo,atrim=0:${total.toFixed(2)}[ca]`);
-    mixIn.push('[ca]');
+    aParts.push(`[aB]asetpts=PTS-STARTPTS[amain]`);
+    amain = 'amain';
   }
+  if (b.replay) {
+    aParts.push(`[aR]atrim=${b.replay.from.toFixed(3)}:${b.replay.to.toFixed(3)},asetpts=PTS-STARTPTS,atempo=${b.replay.speed},volume=0.8[arep]`);
+    aParts.push(`[${amain}][arep]concat=n=2:v=0:a=1[aedit]`);
+    amain = 'aedit';
+  }
+  aParts.push(`[${amain}]apad=pad_dur=${outro}[ca]`);
+  mixIn.push('[ca]');
   if (iVo >= 0) {
-    const delayMs = Math.round((outro > 0 ? clipDur + 0.15 : 0.3) * 1000);
+    const delayMs = Math.round((outro > 0 ? editedDur + 0.15 : 0.3) * 1000);
     aParts.push(`[${iVo}:a]aresample=48000,volume=${t.audio.voVolume},adelay=${delayMs}:all=1[vo]`);
     mixIn.push('[vo]');
   }
@@ -211,14 +274,29 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     '-movflags', '+faststart',
     job.outPath,
   ];
-  log.info(`ffmpeg render -> ${path.basename(job.outPath)} (${total.toFixed(1)}s, clip ${cw}x${ch} at ${cx},${cy})`);
+  log.info(`ffmpeg render -> ${path.basename(job.outPath)} (${total.toFixed(1)}s = clip ${D.toFixed(1)}s + freeze ${tl.freezeDuration}s + replay ${tl.replayDuration}s + outro ${outro}s; clip ${cw}x${ch} at ${cx},${cy})`);
   await run('ffmpeg', args);
 
   const thumbnailPath = job.outPath.replace(/\.mp4$/, '.jpg');
-  await run('ffmpeg', ['-y', '-v', 'error', '-ss', Math.min(1.0, clipDur / 2).toFixed(2), '-i', job.outPath, '-frames:v', '1', '-q:v', '3', thumbnailPath]);
+  const thumbAt = b.sticker ? tl.map(b.sticker.at) + 0.3 : Math.min(1.0, editedDur / 2);
+  await run('ffmpeg', ['-y', '-v', 'error', '-ss', Math.min(thumbAt, total - 0.1).toFixed(2), '-i', job.outPath, '-frames:v', '1', '-q:v', '3', thumbnailPath]);
   const out = await ffprobe(job.outPath);
   if (out.width !== W || out.height !== H) throw new Error(`render produced ${out.width}x${out.height}, expected ${W}x${H}`);
-  return { outPath: job.outPath, durationSec: out.duration, thumbnailPath, command: ['ffmpeg', ...args] };
+  if (out.duration > t.limits.maxDurationSec + 0.5) throw new Error(`render is ${out.duration.toFixed(1)}s, over the ${t.limits.maxDurationSec}s limit`);
+  return { outPath: job.outPath, durationSec: out.duration, thumbnailPath, command: ['ffmpeg', ...args], editedClipSec: editedDur };
+}
+
+/** zoompan punch-in around the peak; `offset` = segment start in source time. Returns a filter suffix (",zoompan=...") or "". */
+function punchIn(b: EditTimeline['beats'], offset: number, fps: number, cw: number, ch: number): string {
+  if (!b.punchIn) return '';
+  const p = b.punchIn;
+  const n0 = Math.max(0, Math.round((p.at - offset) * fps));
+  const n1 = n0 + Math.round(p.rampIn * fps);
+  const n2 = n1 + Math.round(p.hold * fps);
+  const n3 = n2 + Math.round(p.rampOut * fps);
+  const Z = p.zoom.toFixed(3);
+  const z = `if(lt(on,${n0}),1,if(lt(on,${n1}),1+(${Z}-1)*(on-${n0})/${n1 - n0},if(lt(on,${n2}),${Z},if(lt(on,${n3}),${Z}-(${Z}-1)*(on-${n2})/${n3 - n2},1))))`;
+  return `,zoompan=z='${z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${cw}x${ch}:fps=${fps},setsar=1`;
 }
 
 const even = (n: number) => (n % 2 ? n - 1 : n);

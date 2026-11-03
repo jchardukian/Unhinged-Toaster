@@ -1,4 +1,4 @@
-import { BufferApiError, BufferClient, buildWeekPlan, toBufferDueAt, ulid, type BufferService, type Production, type ScheduledPost, type SlotPlan } from '@toaster/shared';
+import { BufferApiError, BufferClient, buildWeekPlan, reviewBlock, toBufferDueAt, ulid, type BufferService, type Candidate, type Production, type ScheduledPost, type SlotPlan } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { isTransient, withRetry } from '../retry.js';
 import type { Store } from '../store.js';
@@ -21,6 +21,15 @@ export function postText(p: Production, service: BufferService, discloseAi: bool
   if (discloseAi) parts.push('Commentary voice is AI-generated.');
   const text = parts.filter(Boolean).join('\n\n');
   return text.slice(0, service === 'tiktok' ? 2100 : 4900);
+}
+
+/** Draft text: the review note (for footage without an explicit license) + the public caption. */
+export function draftText(p: Production, c: Candidate | null, service: BufferService): { text: string; publicText: string; uncertain: boolean } {
+  const publicText = postText(p, service, true);
+  const uncertain = p.reuse_basis === 'review' || (c != null && c.rights_status !== 'cleared');
+  if (!uncertain || !c) return { text: publicText, publicText, uncertain: false };
+  const text = `${reviewBlock(c)}\n\n${publicText}`.slice(0, service === 'tiktok' ? 2150 : 4950);
+  return { text, publicText, uncertain: true };
 }
 
 export interface PublishOptions {
@@ -82,9 +91,14 @@ export async function publishWeek(cfg: Config, store: Store, opts: PublishOption
         };
         row.production_id = prod.id;
         row.candidate_id = prod.candidate_id;
+        const cand = await store.getCandidate(prod.candidate_id);
+        const dt = draftText(prod, cand, service);
+        row.reuse_uncertain = dt.uncertain;
+        row.public_text = dt.publicText;
+        row.review_block_stripped = !dt.uncertain;
         if (!client) { log.info(`[dry-run] would create ${service} draft for ${slotAt}: "${prod.headline}" <- ${prod.public_url}`); result.created++; continue; }
         try {
-          const outcome = await createDraftIdempotent(cfg, client, row, prod, now);
+          const outcome = await createDraftIdempotent(cfg, client, row, prod, dt.text, now);
           row.buffer_post_id = outcome.post.id;
           row.state = (outcome.post.status as ScheduledPost['state']) || row.state;
           row.buffer_error = null;
@@ -108,7 +122,7 @@ export async function publishWeek(cfg: Config, store: Store, opts: PublishOption
   return result;
 }
 
-async function createDraftIdempotent(cfg: Config, client: BufferClient, row: ScheduledPost, prod: Production, now: () => Date): Promise<{ post: { id: string; status: string }; adopted: boolean }> {
+async function createDraftIdempotent(cfg: Config, client: BufferClient, row: ScheduledPost, prod: Production, text: string, now: () => Date): Promise<{ post: { id: string; status: string }; adopted: boolean }> {
   if (!prod.public_url || !/^https?:\/\//.test(prod.public_url)) throw new Error(`production ${prod.id} has no public URL (R2 not configured?)`);
   const existing = await client.findPostAt(cfg.bufferOrgId, row.buffer_channel_id, row.slot_at).catch(() => null);
   if (existing) return { post: existing, adopted: true };
@@ -120,7 +134,7 @@ async function createDraftIdempotent(cfg: Config, client: BufferClient, row: Sch
     }
     const post = await client.createVideoPost({
       channelId: row.buffer_channel_id,
-      text: postText(prod, row.service, true),
+      text,
       videoUrl: prod.public_url!,
       dueAt: toBufferDueAt(row.slot_at, cfg.tz),
       mode: 'customScheduled',

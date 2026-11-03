@@ -45,7 +45,8 @@ test('isoDurationSec and reddit parsing', () => {
   const rv = { fallback_url: 'https://v.redd.it/abc/DASH_720.mp4?source=fallback', duration: 12, width: 720, height: 1280 };
   const post = { id: 'x1', title: 'Cat vs cucumber', author: 'someone', permalink: '/r/funny/comments/x1/cat_vs_cucumber/', url: '', created_utc: 1762000000, score: 5400, upvote_ratio: 0.97, num_comments: 120, over_18: false, is_video: true, subreddit: 'funny' } as any;
   const c = parseRedditCandidate(post, post, rv, 'funny_animals', '2026-11-02T00:00:00Z');
-  assert.equal(c.rights_status, 'unknown');
+  assert.equal(c.rights_status, 'transformation_review', 'reddit footage goes to the labelled review path, never cleared');
+  assert.equal(c.rights_basis, null);
   assert.equal(c.source_url, 'https://www.reddit.com/r/funny/comments/x1/cat_vs_cucumber/');
   assert.equal(c.likes, 5400);
   assert.equal(c.status, 'discovered');

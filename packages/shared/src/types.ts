@@ -17,16 +17,25 @@ export const CONTENT_CATEGORIES: ContentCategory[] = [
 ];
 
 export type SourcePlatform = 'reddit' | 'youtube' | 'pexels' | 'pixabay' | 'internet_archive' | 'manual' | 'licensed_library';
+/** Discovery adapter names (a platform can have several adapters). */
+export type SourceAdapter = SourcePlatform | 'youtube_trending';
 
 /**
- * Rights lifecycle. Only `cleared` may be rendered or sent to Buffer.
- *   unknown           -> discovered, no license information
- *   outreach_pending  -> permission request drafted / sent to the creator
- *   cleared           -> we hold a usable basis + evidence
- *   denied            -> creator declined or source license forbids reuse
- *   expired           -> time-limited license lapsed
+ * Rights lifecycle.
+ *   unknown               -> discovered, no license information, not eligible for anything
+ *   transformation_review -> no explicit reuse license (typical viral UGC). May be rendered into a transformed short and
+ *                            drafted for the OWNER's review, clearly labelled. Never auto-classified as licensed/cleared.
+ *   owner_reviewed        -> the owner approved a transformation-review draft in Buffer; the approval (post id + time)
+ *                            is the recorded basis. Still not "cleared": it is the owner's own transformative-use decision.
+ *   outreach_pending      -> permission request drafted / sent to the creator
+ *   cleared               -> we hold an explicit usable basis + evidence (license, permission, PD, CC BY with low provenance risk)
+ *   denied                -> creator declined, takedown, or source license forbids reuse
+ *   expired               -> time-limited license lapsed
  */
-export type RightsStatus = 'unknown' | 'outreach_pending' | 'cleared' | 'denied' | 'expired';
+export type RightsStatus = 'unknown' | 'transformation_review' | 'owner_reviewed' | 'outreach_pending' | 'cleared' | 'denied' | 'expired';
+
+/** Copyright-risk assessment for footage without an explicit license (LLM + heuristics). `high` is never produced. */
+export type CopyrightRisk = 'low' | 'medium' | 'high';
 
 /** Legal basis for reuse. Each requires evidence (URL / file) stored alongside it. */
 export type RightsBasis =
@@ -37,7 +46,8 @@ export type RightsBasis =
   | 'pixabay_license'
   | 'written_permission' // DM / email from the creator, archived
   | 'licensed'           // paid license (Jukin, ViralHog, Newsflare, Storyful ...)
-  | 'owned';             // produced by us
+  | 'owned'              // produced by us
+  | 'owner_transformative_use'; // owner approved a labelled transformation-review draft; NOT a license
 
 export const CLEARABLE_BASES: RightsBasis[] = [
   'cc_by', 'cc0', 'public_domain', 'pexels_license', 'pixabay_license', 'written_permission', 'licensed', 'owned',
@@ -95,6 +105,8 @@ export interface Candidate {
   rights_basis: RightsBasis | null;
   rights_evidence: string | null;      // URL / note / archived message id
   rights_notes: string | null;
+  copyright_risk: CopyrightRisk | null;        // for transformation_review footage
+  copyright_risk_reasons: string | null;       // JSON array of strings
   attribution_text: string | null;     // what we print in the description
   status: CandidateStatus;
   status_reason: string | null;
@@ -115,6 +127,8 @@ export interface Production {
   thumbnail_url: string | null;
   duration_sec: number | null;
   render_log: string | null;
+  reuse_basis?: 'cleared' | 'review' | null;   // basis at render time (see rights.ts productionBasis)
+  edit_plan?: string | null;                   // JSON EditBeats actually applied
   created_at: string;
   updated_at: string;
 }
@@ -147,6 +161,9 @@ export interface ScheduledPost {
   missing_since?: string | null;       // first "not found" observation
   idempotency_key?: string | null;     // `${batch_week}|${slot_at}|${service}`
   create_attempts?: number;
+  reuse_uncertain?: boolean;           // draft carries a REVIEW block; footage has no explicit license
+  public_text?: string | null;         // clean caption to write back on approval (review block stripped)
+  review_block_stripped?: boolean;
   // performance (filled by metrics sync)
   views: number | null;
   likes: number | null;
@@ -186,4 +203,7 @@ export interface CopyResult {
   commentary: string;    // ONE sentence, <= 110 chars, spoken by the toaster
   caption: string;       // post description without attribution/hashtags
   hashtags: string[];    // 4-8 tags without '#'
+  sticker?: string;      // 1-3 word comic reaction shown at the peak moment ("NOPE.", "WHY.", "OH NO")
+  freeze_text?: string;  // short text for the pre-peak freeze frame ("WAIT FOR IT…")
+  edit_style?: 'full' | 'light';  // light = fewer beats (clip is already very short or dialogue-driven)
 }

@@ -281,6 +281,14 @@ export class BufferClient {
 
   /** Move an approved post to its exact slot (customScheduled). */
   async reschedulePost(id: string, dueAt: string): Promise<BufferPost> {
+    return this.editPost(id, { dueAt, mode: 'customScheduled' });
+  }
+
+  /** Edit text and/or schedule of an existing post. Used to strip the review note after the owner approves a draft. */
+  async editPost(id: string, changes: { dueAt?: string; mode?: BufferMode; text?: string }): Promise<BufferPost> {
+    const input: Record<string, unknown> = { id };
+    if (changes.text !== undefined) input.text = changes.text;
+    if (changes.dueAt !== undefined) { input.dueAt = changes.dueAt; input.mode = changes.mode ?? 'customScheduled'; }
     const d = await this.gql<{ editPost: { __typename: string; message?: string; post?: BufferPost } }>(
       `mutation($input: EditPostInput!) {
          editPost(input: $input) {
@@ -289,7 +297,7 @@ export class BufferClient {
            ... on MutationError { message }
          }
        }`,
-      { input: { id, dueAt, mode: 'customScheduled' } },
+      { input },
     );
     if (!d.editPost.post) throw new BufferApiError(`editPost failed: ${d.editPost.message ?? d.editPost.__typename}`, 200, undefined, d);
     return d.editPost.post;

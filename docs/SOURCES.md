@@ -19,7 +19,23 @@ found during research; nothing was purchased.
 | **Vimeo (CC filter)** | Moderate; CC filtering exists in UI, API download access unverified | Low | CC BY (uploader-asserted) | Unverified | $0 | Provenance | Not implemented |
 | Storyblocks / Pond5 / Getty / Artlist | Large stock catalogs, some have partner APIs | None (stock) | Yes (subscription) | Enterprise APIs | $30–$300+/month | Account | Not relevant for *viral* |
 
-## Conclusion (precise blocker)
+## Update (iteration 3): viral-first with transformation review
+
+The owner chose to keep the original model: previously viral footage, meaningfully transformed, with a per-draft
+owner decision for footage that has no license on file. Implemented as a separate, labelled path
+(`docs/RIGHTS_POLICY.md`, Path B):
+
+| Source | Default | Rights path | Automated download |
+|---|---|---|---|
+| Reddit top-of-day (12 subreddits) | **on** when a free Reddit script app is configured | transformation review | yes (v.redd.it video + audio, merged) |
+| YouTube most-popular chart (Comedy / Pets / Entertainment, Shorts-length) | opt-in `ENABLE_YOUTUBE_TRANSFORM=true` | transformation review (CC BY + low provenance → cleared) | yt-dlp (YouTube ToS caveat) |
+| YouTube CC search | opt-in `ENABLE_YOUTUBE_CC=true` | cleared only with low provenance risk | yt-dlp |
+| Pixabay / Pexels / Internet Archive | on when keys exist | cleared | yes |
+
+Ordering is viral-first (final score), so Path-B clips fill the week before stock-style fillers. Every Path-B draft is
+labelled in Buffer, the readiness report counts them separately, and `high` copyright-risk footage is never produced.
+
+## Conclusion from the licensing research (still true)
 
 - **No free or API-accessible source supplies proven-viral entertainment footage with redistribution rights.** The
   sources that do have that footage (Jukin, ViralHog, Collab Clips, Newsflare) are sales-led, have no self-serve API,

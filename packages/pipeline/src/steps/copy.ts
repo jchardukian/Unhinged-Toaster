@@ -9,7 +9,10 @@ Output JSON:
  "headline": string,     // 3-8 words, ALL CAPS energy not required, max 60 characters, no hashtags, no emojis, no quotes
  "commentary": string,   // exactly ONE sentence the toaster yells about THIS clip, max 110 characters, must reference something specific in the clip
  "caption": string,      // 1-2 sentence post description, max 180 chars, no hashtags
- "hashtags": string[]    // 5-7 tags without '#', mix of broad (funny, fails, shorts) and specific
+ "hashtags": string[],   // 5-7 tags without '#', mix of broad (funny, fails, shorts) and specific
+ "sticker": string,      // 1-3 word comic reaction that pops on screen at the peak moment, e.g. "NOPE.", "WHY.", "OH NO.", "BONK."
+ "freeze_text": string,  // 1-4 words shown on a freeze-frame just before the payoff, e.g. "WAIT FOR IT…", "HE HAS NO IDEA"
+ "edit_style": "full" | "light"  // light when the clip is dialogue-driven or the joke needs continuous motion (no freeze, no replay)
 }`;
 
 export async function writeCopy(cfg: Config, c: Candidate, transcript?: string | null): Promise<CopyResult> {
@@ -38,12 +41,24 @@ export function validate(r: CopyResult): CopyResult | null {
   // single sentence: at most one terminal punctuation run
   if ((commentary.match(/[.!?]+/g) ?? []).length > 1) return null;
   if (containsSlur(headline) || containsSlur(commentary) || containsSlur(r.caption ?? '')) return null;
+  const sticker = cleanShort(r.sticker, 14);
+  const freeze = cleanShort(r.freeze_text, 22);
   return {
     headline,
     commentary,
     caption: clampSentence(String(r.caption ?? ''), 180),
     hashtags: normaliseHashtags(Array.isArray(r.hashtags) ? r.hashtags : ['funny', 'shorts', 'fails'], 7),
+    sticker: sticker || undefined,
+    freeze_text: freeze || undefined,
+    edit_style: r.edit_style === 'light' ? 'light' : 'full',
   };
+}
+
+function cleanShort(v: unknown, max: number): string {
+  if (typeof v !== 'string') return '';
+  const t = v.replace(/["“”#]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+  if (!t || t.length > max || containsSlur(t)) return '';
+  return t;
 }
 
 export function fallback(c: Candidate): CopyResult {
@@ -54,5 +69,5 @@ export function fallback(c: Candidate): CopyResult {
     wholesome_reactions: { h: 'Protect this reaction at all costs', c: 'I am a furious kitchen appliance and even I teared up.' },
   };
   const f = byCat[c.category ?? 'people_fails'] ?? byCat.people_fails;
-  return { headline: f.h, commentary: f.c, caption: 'The Unhinged Toaster reacts.', hashtags: ['funny', 'shorts', 'fails', 'viral', 'comedy'] };
+  return { headline: f.h, commentary: f.c, caption: 'The Unhinged Toaster reacts.', hashtags: ['funny', 'shorts', 'fails', 'viral', 'comedy'], sticker: 'OH NO.', freeze_text: 'WAIT FOR IT…', edit_style: 'full' };
 }
