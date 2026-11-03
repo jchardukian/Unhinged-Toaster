@@ -7,7 +7,7 @@ import { loadTemplate, pickMusic, renderShort } from './steps/render.js';
 import { synthesiseCommentary } from './steps/tts.js';
 import { writeCopy } from './steps/copy.js';
 import { analyzeClip } from './steps/analyze.js';
-import { planEdit, type Candidate } from '@toaster/shared';
+import { planEdit, qualityTier, type Candidate } from '@toaster/shared';
 
 /**
  * End-to-end smoke test with a synthetic clip we own: builds a 9 s landscape test video whose
@@ -58,6 +58,9 @@ export async function runDemo(cfg: Config, flags: Record<string, string | boolea
   // 3. clip-specific edit plan from signal analysis + director fields
   const t = loadTemplate(cfg);
   const analysis = await analyzeClip(clip);
+  const probeQ = await (await import('./steps/media.js')).ffprobe(clip);
+  const tier = qualityTier(probeQ.width, probeQ.height);
+  log.info(`source ${probeQ.width}x${probeQ.height} -> quality tier ${tier}${tier === 'low' ? ' (the production pipeline REJECTS this; demo continues)' : tier === 'ok' ? ' (used only when 1080p stock runs out)' : ''}`);
   const timeline = planEdit({
     sourceDuration: Math.min(analysis.duration, t.limits.maxDurationSec - t.commentary.outroSeconds), peak: analysis.peak?.t ?? null,
     maxTotal: t.limits.maxDurationSec - t.commentary.outroSeconds, style: copy.edit_style ?? 'full', stickerText: copy.sticker ?? null, freezeText: copy.freeze_text ?? null,

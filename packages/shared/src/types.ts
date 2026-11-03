@@ -59,6 +59,7 @@ export type CandidateStatus =
   | 'rejected_score'
   | 'rejected_duplicate'
   | 'rejected_safety'
+  | 'rejected_quality'  // source below 720p-class
   | 'blocked_rights'
   | 'ready'          // cleared + scored, waiting to be produced
   | 'producing'
@@ -106,6 +107,7 @@ export interface Candidate {
   rights_evidence: string | null;      // URL / note / archived message id
   rights_notes: string | null;
   copyright_risk: CopyrightRisk | null;        // for transformation_review footage
+  quality_tier?: 'hd' | 'ok' | 'low' | null;   // see quality.ts; 'ok' is last-resort only
   copyright_risk_reasons: string | null;       // JSON array of strings
   attribution_text: string | null;     // what we print in the description
   status: CandidateStatus;

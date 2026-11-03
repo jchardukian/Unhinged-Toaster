@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { creditText, findDuplicate, planEdit, productionBasis, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
+import { creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
 import { analyzeClip } from './analyze.js';
 import { log, type Config } from '../config.js';
 import type { Store } from '../store.js';
@@ -22,7 +22,7 @@ export function rightsPolicy(cfg: Config): RightsPolicy {
   return { transformationReview: cfg.transformationReview, maxCopyrightRisk: cfg.maxCopyrightRisk };
 }
 
-export async function produceCandidate(cfg: Config, store: Store, c: Candidate): Promise<Production | null> {
+export async function produceCandidate(cfg: Config, store: Store, c: Candidate, opts: { allowOkTier?: boolean } = {}): Promise<Production | null> {
   const dir = path.join(cfg.workDir, 'jobs', c.id);
   fs.mkdirSync(dir, { recursive: true });
   const now = () => new Date().toISOString();
@@ -37,6 +37,18 @@ export async function produceCandidate(cfg: Config, store: Store, c: Candidate):
     const src = await withRetry(`download ${c.id}`, () => downloadMedia(c, dir), { attempts: 3, baseMs: 3000 });
     const probe = await ffprobe(src);
     if (probe.duration < 3) throw new Error(`clip too short (${probe.duration.toFixed(1)}s)`);
+    const tier = qualityTier(probe.width, probe.height);
+    if (tier === 'low' && !cfg.allowLowQuality) {
+      await store.patchCandidate(c.id, { status: 'rejected_quality', quality_tier: tier, width: probe.width, height: probe.height, status_reason: `source ${probe.width}x${probe.height} below 720p-class` });
+      log.info(`rejected ${c.id}: quality ${probe.width}x${probe.height} (${tier})`);
+      return null;
+    }
+    if (tier === 'ok' && opts.allowOkTier === false) {
+      await store.patchCandidate(c.id, { quality_tier: tier, width: probe.width, height: probe.height, status_reason: 'held: 720p-class, used only when 1080p stock runs out' });
+      log.info(`held ${c.id}: ${probe.width}x${probe.height} is 720p-class; preferring 1080p sources`);
+      return null;
+    }
+    await store.patchCandidate(c.id, { quality_tier: tier });
 
     // perceptual dedupe against everything we know
     const phash = await videoPhash(src);
@@ -133,11 +145,24 @@ export async function produceUntil(cfg: Config, store: Store, target: number): P
   if (have >= target) return have;
   const policy = rightsPolicy(cfg);
   const ready = (await store.listCandidates({ status: ['scored', 'ready'] })).filter((c) => productionBasis(c, policy) !== null);
-  log.info(`need ${target - have} more productions; ${ready.length} cleared candidates available`);
-  for (const c of ready) {
+  // 1080p-class sources first (known from discovery metadata or a previous probe); 720p-class only if still short.
+  const tierOf = (c: Candidate) => c.quality_tier ?? qualityTier(c.width, c.height);
+  const hdOrUnknown = ready.filter((c) => tierOf(c) !== 'ok' && tierOf(c) !== 'low');
+  const okOnly = ready.filter((c) => tierOf(c) === 'ok');
+  log.info(`need ${target - have} more productions; ${hdOrUnknown.length} 1080p-class/unprobed + ${okOnly.length} 720p-class candidates available`);
+  for (const c of hdOrUnknown) {
     if (have >= target) break;
-    const p = await produceCandidate(cfg, store, c);
+    const p = await produceCandidate(cfg, store, c, { allowOkTier: false });
     if (p) have++;
+  }
+  if (have < target && okOnly.length) {
+    log.warn(`1080p-class stock exhausted; falling back to ${okOnly.length} 720p-class candidate(s)`);
+    const held = (await store.listCandidates({ status: ['scored', 'ready'] })).filter((c) => tierOf(c) === 'ok' && productionBasis(c, policy) !== null);
+    for (const c of held) {
+      if (have >= target) break;
+      const p = await produceCandidate(cfg, store, c, { allowOkTier: true });
+      if (p) have++;
+    }
   }
   return have;
 }

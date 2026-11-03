@@ -53,7 +53,8 @@ test('planEdit builds freeze / punch-in / replay / sticker around the peak and r
   const tl = planEdit({ sourceDuration: 12, peak: 7.4, maxTotal: 55, style: 'full', stickerText: 'NOPE.', freezeText: 'WAIT FOR IT…', hasSpeech: false });
   assert.deepEqual(tl.beats.freeze, { at: 6.4, duration: 0.7, text: 'WAIT FOR IT…' });
   assert.equal(tl.beats.punchIn?.at, 7.3);
-  assert.deepEqual(tl.beats.replay, { from: 6.6, to: 8.2, speed: 0.5, zoom: 1.15 });
+  assert.deepEqual(tl.beats.replay, { from: 6.6, to: 8.2, speed: 0.5, zoom: 1.05 });
+  assert.equal(tl.beats.punchIn?.zoom, 1.1, 'gentle zoom keeps the whole frame visible');
   assert.equal(tl.beats.sticker?.text, 'NOPE.');
   assert.equal(tl.editedDuration, 15.9);
   assert.equal(tl.map(3), 3);
@@ -154,4 +155,17 @@ test('cleared footage drafts carry no note and are untouched on approval', async
   assert.equal(r.approved, 1);
   assert.equal(edited, 0);
   assert.equal(store.patches.some((p) => p.patch.rights_status), false);
+});
+
+test('quality gate: 1080p-class required, 720p-class last resort, lower rejected', async () => {
+  const { qualityTier, upscaleFactor } = await import('../src/quality.js');
+  assert.equal(qualityTier(1080, 1920), 'hd');
+  assert.equal(qualityTier(1920, 1080), 'hd');
+  assert.equal(qualityTier(720, 1280), 'ok');
+  assert.equal(qualityTier(1280, 720), 'ok');
+  assert.equal(qualityTier(480, 360), 'low');
+  assert.equal(qualityTier(202, 360), 'low');
+  assert.equal(qualityTier(null, 1920), null);
+  assert.equal(upscaleFactor(1080, 1920), 1);
+  assert.equal(upscaleFactor(720, 1280), 1.5);
 });

@@ -74,10 +74,14 @@ Exact (normalised URL) → perceptual (64-bit DCT pHash on 5 sampled frames, mea
 
 ## Rendering (`packages/pipeline/src/steps/render.ts`)
 
-Single FFmpeg graph, 1080×1920 @ 30 fps, H.264 CRF 20, AAC 160k, loudnorm −14 LUFS. The footage owns the screen:
-near-vertical sources are rendered **full-bleed** (cover the whole canvas; headline box, captions, watermark and a smaller
-mascot overlap the footage), landscape/square sources run **full-width** in the upper-middle with the headline above and
-captions below. Then: ASS karaoke captions → reaction sticker → optional outro (spoken commentary, text-only, or none when
+Single FFmpeg graph, 1080×1920 @ 30 fps, H.264 CRF 18 (preset slow), AAC 192k, loudnorm −14 LUFS. The footage owns the
+screen and is **never cropped**: tall sources are fitted to the full canvas (a 9:16 source fills it exactly; 4:5 / 3:4
+sources get the burst background above and below) with the headline box, captions, wordmark and a smaller mascot
+overlapping; landscape/square sources run **full-width** in the upper-middle with the headline above and captions below.
+Punch-in zoom is 1.10 and replay zoom 1.05 so the subject never leaves the frame. Upscales above 1.15× get gentle
+sharpening. **Quality gate** (`shared/quality.ts`): 1080p-class sources (≥ 1080 px across the stretched dimension) are
+required; 720p-class sources are used only when 1080p stock cannot fill the week; anything lower is `rejected_quality`.
+Reddit downloads take the highest DASH rendition; yt-dlp takes best video up to 4K. Then: ASS karaoke captions → reaction sticker → optional outro (spoken commentary, text-only, or none when
 the clip's own sound is the joke – the LLM director decides, `COMMENTARY_DEFAULT` overrides) → watermark + handle →
 bobbing mascot. Template geometry lives in `template/template.json`.
 

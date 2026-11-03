@@ -73,7 +73,16 @@ async function downloadReddit(c: Candidate, out: string): Promise<string> {
   const videoUrl = c.media_url.split('?')[0];
   const baseUrl = videoUrl.replace(/\/[^/]+$/, '');
   const v = out.replace(/\.mp4$/, '.v.mp4');
-  await fetchToFile(videoUrl, v, { 'user-agent': 'unhinged-toaster/0.1' });
+  // Always take the highest DASH rendition Reddit has; fallback_url is not always the best one.
+  let got = false;
+  for (const name of ['DASH_1080.mp4', 'DASH_720.mp4']) {
+    if (videoUrl.endsWith('/' + name)) break;
+    try {
+      await fetchToFile(`${baseUrl}/${name}`, v, { 'user-agent': 'unhinged-toaster/0.1' });
+      if (fs.statSync(v).size > 50_000) { got = true; log.info(`reddit: using ${name}`); break; }
+    } catch { /* rendition not available */ }
+  }
+  if (!got) await fetchToFile(videoUrl, v, { 'user-agent': 'unhinged-toaster/0.1' });
   let a: string | null = null;
   for (const name of ['DASH_AUDIO_128.mp4', 'DASH_AUDIO_64.mp4', 'DASH_audio.mp4', 'audio']) {
     const target = out.replace(/\.mp4$/, '.a.mp4');
@@ -93,7 +102,8 @@ async function downloadWithYtDlp(url: string, out: string): Promise<string> {
   } catch {
     throw new Error('yt-dlp is not installed (pip install yt-dlp). YouTube CC-BY clips cannot be fetched without it.');
   }
-  await run('yt-dlp', ['-f', 'bv*[height<=1920][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b', '--merge-output-format', 'mp4', '--no-playlist', '-o', out, url]);
+  // best video up to 4K (we downscale cleanly), best audio; never a pre-muxed low-quality stream unless nothing else exists
+  await run('yt-dlp', ['-f', 'bv*[height<=2160][ext=mp4]+ba[ext=m4a]/bv*[height<=2160]+ba/b[ext=mp4]/b', '--merge-output-format', 'mp4', '--no-playlist', '-o', out, url]);
   return out;
 }
 

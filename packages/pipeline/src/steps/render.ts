@@ -86,16 +86,19 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const editedDur = tl.editedDuration;
   const total = editedDur + outro;
 
-  // Layout: the footage owns the screen. Near-vertical sources fill the whole canvas (cover, branding overlaps);
-  // landscape/square sources run full-width and sit in the upper-middle with the headline above and captions below.
+  // Layout: the footage owns the screen and is NEVER cropped. Tall sources are fitted to the full canvas (a 9:16
+  // source fills it exactly; 4:5 / 3:4 sources get the burst background above and below) with branding overlapping;
+  // landscape/square sources run full-width in the upper-middle with the headline above and captions below.
   const containScale = Math.min(W / probe.width, H / probe.height);
   const cover = probe.height * containScale >= (t.clip.coverIfTallerThan ?? 1440);
+  const sharpen = containScale > 1.15 ? ',unsharp=5:5:0.6:5:5:0.0' : '';
   let cw: number, ch: number, cx: number, cy: number, preScale = '';
   if (cover) {
-    const sc = Math.max(W / probe.width, H / probe.height);
-    const sw = even(Math.ceil(probe.width * sc)), sh = even(Math.ceil(probe.height * sc));
-    cw = W; ch = H; cx = 0; cy = 0;
-    preScale = `scale=${sw}:${sh}:flags=lanczos,crop=${W}:${H}`;
+    cw = even(Math.floor(probe.width * containScale));
+    ch = even(Math.floor(probe.height * containScale));
+    cx = Math.round((W - cw) / 2);
+    cy = Math.round((H - ch) / 2);
+    preScale = `scale=${cw}:${ch}:flags=lanczos${sharpen}`;
   } else {
     const sc = Math.min(t.clip.maxWidth / probe.width, t.clip.maxHeight / probe.height);
     cw = even(Math.floor(probe.width * sc));
@@ -104,7 +107,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     const minTop = t.clip.minTop ?? 440;
     const centerY = t.clip.landscapeCenterY ?? 900;
     cy = Math.max(minTop, Math.min(H - ch - 380, Math.round(centerY - ch / 2)));
-    preScale = `scale=${cw}:${ch}:flags=lanczos`;
+    preScale = `scale=${cw}:${ch}:flags=lanczos${sharpen}`;
   }
   const fw = cover ? 0 : t.clip.frameWidth, so = t.clip.shadowOffset;
 
@@ -140,7 +143,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     assFile = path.join(job.workDir, 'captions.ass');
     fs.writeFileSync(assFile, buildAss(words, {
       fontName: fontFamilyName(font), fontSize: t.captions.fontSize, playResX: W, playResY: H,
-      marginV: cover ? (t.captions.coverMarginV ?? 470) : H - (cy + ch) + t.captions.bottomPadding,
+      marginV: cover ? Math.max(t.captions.coverMarginV ?? 470, H - (cy + ch) + t.captions.bottomPadding) : H - (cy + ch) + t.captions.bottomPadding,
       primary: assColor(t.captions.activeColor), secondary: assColor(t.captions.idleColor), outline: assColor(t.captions.outlineColor),
     }));
   }
@@ -149,7 +152,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const f: string[] = [];
   if (useBgLoop) f.push(`[${iBg}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${fps},format=rgba[bg0]`);
   else f.push(`[${iBg}:v]rotate=t*0.10:ow=${W}:oh=${H}:c=black,scale=w=${W}*(1.02+0.02*sin(t*1.3)):h=${H}*(1.02+0.02*sin(t*1.3)):eval=frame,crop=${W}:${H},fps=${fps},format=rgba[bg0]`);
-  if (cover) f.push('[bg0]null[bg1]');
+  if (cover && cw === W && ch === H) f.push('[bg0]null[bg1]');
   else f.push(`[bg0]drawbox=x=${cx - fw + so}:y=${cy - fw + so}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.black}@0.85:t=fill[bg1]`);
 
   // --- edited clip chain
@@ -183,7 +186,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   f.push(`[${mainLabel}]setpts=PTS-STARTPTS${padClip}[clip]`);
 
   f.push(`[bg1][clip]overlay=x=${cx}:y=${cy}:shortest=0[v1]`);
-  if (cover) f.push('[v1]null[v2]');
+  if (cover && cw === W && ch === H) f.push('[v1]null[v2]');
   else f.push(`[v1]drawbox=x=${cx - fw}:y=${cy - fw}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.yellow}:t=${fw}[v2]`);
 
   // headline box + text (smaller and higher in cover mode so it overlaps as little footage as possible)
@@ -301,12 +304,12 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     '-map', '[vout]', '-map', '[aout]',
     '-t', total.toFixed(2),
     '-r', String(fps),
-    '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-g', String(fps * 2),
-    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
+    '-c:v', 'libx264', '-preset', 'slow', '-crf', '18', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-g', String(fps * 2),
+    '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
     '-movflags', '+faststart',
     job.outPath,
   ];
-  log.info(`ffmpeg render -> ${path.basename(job.outPath)} (${total.toFixed(1)}s = clip ${D.toFixed(1)}s + freeze ${tl.freezeDuration}s + replay ${tl.replayDuration}s + outro ${outro}s [${mode}]; ${cover ? 'full-bleed' : 'full-width'} ${cw}x${ch} at ${cx},${cy})`);
+  log.info(`ffmpeg render -> ${path.basename(job.outPath)} (${total.toFixed(1)}s = clip ${D.toFixed(1)}s + freeze ${tl.freezeDuration}s + replay ${tl.replayDuration}s + outro ${outro}s [${mode}]; ${cover ? 'full-screen' : 'full-width'} ${cw}x${ch} at ${cx},${cy}; source ${probe.width}x${probe.height}, scale x${containScale.toFixed(2)}${sharpen ? ' +sharpen' : ''})`);
   await run('ffmpeg', args);
 
   const thumbnailPath = job.outPath.replace(/\.mp4$/, '.jpg');

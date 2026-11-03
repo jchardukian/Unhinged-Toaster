@@ -36,9 +36,11 @@ export interface PlanInput {
   freezeText?: string | null;
   muteSource?: boolean;
   hasSpeech?: boolean;          // dialogue-driven clips get no freeze (it breaks sentences)
+  punchZoom?: number;           // override the punch-in zoom (default 1.10)
 }
 
-export const DEFAULTS = { freeze: 0.7, replayWindow: 0.8, replaySpeed: 0.5, punchZoom: 1.28, stickerDuration: 1.3 };
+/** Zooms are gentle on purpose: the full frame must stay visible (a 1.10 punch-in crops 4.5 % per side). */
+export const DEFAULTS = { freeze: 0.7, replayWindow: 0.8, replaySpeed: 0.5, punchZoom: 1.10, replayZoom: 1.05, stickerDuration: 1.3 };
 
 export function planEdit(i: PlanInput): EditTimeline {
   const D = i.sourceDuration;
@@ -52,13 +54,13 @@ export function planEdit(i: PlanInput): EditTimeline {
   else if (i.hasSpeech) dropped.push('freeze:speech');
   else if (!(peak - 1.0 >= 1.0)) dropped.push('freeze:peak_too_early');
 
-  const punchIn: EditBeats['punchIn'] = { at: round2(Math.max(0, peak - 0.1)), zoom: DEFAULTS.punchZoom, rampIn: 0.25, hold: light ? 0.6 : 1.0, rampOut: 0.35 };
+  const punchIn: EditBeats['punchIn'] = { at: round2(Math.max(0, peak - 0.1)), zoom: i.punchZoom ?? DEFAULTS.punchZoom, rampIn: 0.25, hold: light ? 0.6 : 1.0, rampOut: 0.35 };
 
   let replay: EditBeats['replay'] = null;
   if (!light && D >= 6) {
     const from = round2(Math.max(0, peak - DEFAULTS.replayWindow));
     const to = round2(Math.min(D, peak + DEFAULTS.replayWindow));
-    if (to - from >= 0.8) replay = { from, to, speed: DEFAULTS.replaySpeed, zoom: 1.15 };
+    if (to - from >= 0.8) replay = { from, to, speed: DEFAULTS.replaySpeed, zoom: DEFAULTS.replayZoom };
   } else dropped.push(light ? 'replay:light' : 'replay:too_short');
 
   const sticker: EditBeats['sticker'] = i.stickerText ? { at: round2(Math.max(0, peak + 0.05)), duration: DEFAULTS.stickerDuration, text: i.stickerText } : null;

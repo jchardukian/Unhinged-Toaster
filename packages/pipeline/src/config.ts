@@ -45,6 +45,7 @@ export interface Config {
   bufferTagClearedId: string | undefined;
   contactEmail: string;
   commentaryDefault: 'auto' | 'always' | 'never';
+  allowLowQuality: boolean;
   youtubeKey: string | undefined;
   enableYoutubeCc: boolean;
   enableYoutubeTransform: boolean;
@@ -85,6 +86,7 @@ export function loadConfig(): Config {
     bufferTagReviewId: e.BUFFER_TAG_REVIEW_ID || undefined,
     bufferTagClearedId: e.BUFFER_TAG_CLEARED_ID || undefined,
     contactEmail: e.CONTACT_EMAIL || 'theunhingedtoaster@gmail.com',
+    allowLowQuality: e.ALLOW_LOW_QUALITY === 'true',
     commentaryDefault: (['auto', 'always', 'never'].includes(e.COMMENTARY_DEFAULT ?? '') ? e.COMMENTARY_DEFAULT : 'auto') as 'auto' | 'always' | 'never',
     youtubeKey: e.YOUTUBE_API_KEY,
     enableYoutubeCc: e.ENABLE_YOUTUBE_CC === 'true',

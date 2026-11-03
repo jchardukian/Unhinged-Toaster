@@ -91,6 +91,7 @@ export function buildReadinessReport(input: {
       case 'rejected_score': bump('score_below_threshold'); break;
       case 'rejected_safety': bump(`safety:${(c.status_reason ?? 'flag').replace(/^safety:/, '')}`); break;
       case 'rejected_duplicate': bump('duplicate'); break;
+      case 'rejected_quality': bump(`quality_below_720p${c.width && c.height ? ` (${c.width}x${c.height})` : ''}`); break;
       case 'failed': bump(`render_failed:${(c.status_reason ?? 'unknown').slice(0, 60)}`); break;
       case 'scored':
       case 'ready':

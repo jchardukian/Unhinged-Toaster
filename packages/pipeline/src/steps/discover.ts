@@ -1,4 +1,4 @@
-import { ccProvenanceRisk, ulid, initialRights, type Candidate, type ContentCategory, type SourceAdapter, type SourcePlatform } from '@toaster/shared';
+import { ccProvenanceRisk, qualityTier, ulid, initialRights, type Candidate, type ContentCategory, type SourceAdapter, type SourcePlatform } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { withRetry } from '../retry.js';
 
@@ -249,6 +249,7 @@ export function parseRedditCandidate(post: RedditChild['data'], d: RedditChild['
     title: d.title, description: d.selftext?.slice(0, 500) || `r/${post.subreddit}`, category, duration_sec: rv.duration, width: rv.width, height: rv.height,
     published_at: new Date(d.created_utc * 1000).toISOString(), views: null, likes: d.score, comments: d.num_comments, shares: d.num_crossposts ?? 0, engagement_velocity: null,
     ...initialRights('reddit', {}),
+    quality_tier: qualityTier(rv.width, rv.height),
   };
 }
 
