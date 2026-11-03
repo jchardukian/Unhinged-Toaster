@@ -20,7 +20,28 @@ export async function transcribe(cfg: Config, audioFile: string): Promise<Transc
   const j = (await res.json()) as { text: string; words?: Word[] };
   const words = (j.words ?? []).filter((w) => w.word.trim());
   if (words.length === 0 || j.text.trim().length < 2) return null;
+  const h = isHallucination(j.text, words);
+  if (h) { log.info(`transcript discarded as Whisper hallucination (${h}): "${j.text.trim().slice(0, 60)}"`); return null; }
   return { text: j.text.trim(), words };
+}
+
+/**
+ * Whisper invents text on music / noise / silence ("Thanks for watching!", repeated syllables, foreign-script loops).
+ * Captions must never show that, so such transcripts are dropped (the short then simply has no captions).
+ */
+export function isHallucination(text: string, words: Word[]): string | null {
+  const t = text.trim();
+  const letters = t.replace(/[^\p{L}]/gu, '');
+  if (letters.length === 0) return 'no_letters';
+  const latin = letters.replace(/[^A-Za-z\u00C0-\u024F]/g, '').length;
+  if (latin / letters.length < 0.6) return 'non_latin_script';
+  const toks = t.toLowerCase().split(/\s+/).filter(Boolean);
+  if (toks.length >= 4 && new Set(toks).size / toks.length < 0.35) return 'repetitive';
+  if (/^(thanks? (you )?for watching|thank you|subscribe|like and subscribe|see you (in the )?next|bye[.!]*)[.!\s]*$/i.test(t)) return 'stock_phrase';
+  const span = words[words.length - 1].end - words[0].start;
+  const spoken = words.reduce((a, w) => a + Math.max(0, w.end - w.start), 0);
+  if (toks.length >= 6 && span > 3 && spoken / span < 0.08) return 'implausible_timing';
+  return null;
 }
 
 export interface CaptionStyle {

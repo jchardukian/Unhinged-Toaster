@@ -15,7 +15,7 @@ export interface Template {
   clip: { maxWidth: number; maxHeight: number; coverIfTallerThan?: number; landscapeCenterY?: number; minTop?: number; frameWidth: number; shadowOffset: number };
   captions: { fontSize: number; bottomPadding: number; coverMarginV?: number; activeColor: string; idleColor: string; outlineColor: string };
   mascot: { width: number; coverWidth?: number; right: number; bottom: number; bobAmplitude: number; bobSpeed: number };
-  watermark: { logoWidth: number; x: number; y: number; fontSize: number };
+  watermark: { logoWidth: number; x: number; y: number; fontSize: number; wordmarkWidth?: number; wordmarkBottom?: number };
   commentary: { position: 'outro' | 'intro'; outroSeconds: number; fontSize: number; boxColor: string; textColor: string; y: number; maxCharsPerLine: number; maxLines?: number };
   audio: { musicVolume: number; voVolume: number; loudnorm: string };
   limits: { maxDurationSec: number };
@@ -128,6 +128,8 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const iLogo = add('-loop', '1', '-i', logo);
   const shoutPath = path.join(cfg.assetsDir, 'brand', 'mascot_shout.png');
   const iShout = fs.existsSync(shoutPath) ? add('-loop', '1', '-i', shoutPath) : -1;
+  const wordmarkPath = path.join(cfg.assetsDir, 'brand', 'wordmark.png');
+  const iWordmark = fs.existsSync(wordmarkPath) ? add('-loop', '1', '-i', wordmarkPath) : -1;
   const iVo = useVo ? add('-i', job.voPath!) : -1;
   const iMusic = job.musicPath ? add('-stream_loop', '-1', '-i', job.musicPath) : -1;
 
@@ -226,10 +228,16 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     cur = nxt;
   });
 
-  // watermark
-  f.push(`[${iLogo}:v]scale=${t.watermark.logoWidth}:-1[logo]`);
-  f.push(`[${cur}][logo]overlay=x=${t.watermark.x}:y=${t.watermark.y}[wm0]`);
-  f.push(`[wm0]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(t.handle)}':fontsize=${t.watermark.fontSize}:fontcolor=${t.colors.white}:borderw=4:bordercolor=${t.colors.black}:x=${t.watermark.x + t.watermark.logoWidth + 14}:y=${t.watermark.y + Math.round(t.watermark.logoWidth / 2 - t.watermark.fontSize / 2)}[wm]`);
+  // watermark: the real wordmark when available, else round logo + handle text
+  if (iWordmark >= 0) {
+    const ww = t.watermark.wordmarkWidth ?? 330;
+    f.push(`[${iWordmark}:v]scale=${ww}:-1[wmark]`);
+    f.push(`[${cur}][wmark]overlay=x=${t.watermark.x}:y=H-h-${t.watermark.wordmarkBottom ?? 28}[wm]`);
+  } else {
+    f.push(`[${iLogo}:v]scale=${t.watermark.logoWidth}:-1[logo]`);
+    f.push(`[${cur}][logo]overlay=x=${t.watermark.x}:y=${t.watermark.y}[wm0]`);
+    f.push(`[wm0]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(t.handle)}':fontsize=${t.watermark.fontSize}:fontcolor=${t.colors.white}:borderw=4:bordercolor=${t.colors.black}:x=${t.watermark.x + t.watermark.logoWidth + 14}:y=${t.watermark.y + Math.round(t.watermark.logoWidth / 2 - t.watermark.fontSize / 2)}[wm]`);
+  }
 
   // mascot (bobbing); optional "shout" pose while the commentary plays and at the sticker moment
   const mascotW = cover ? (t.mascot.coverWidth ?? 250) : t.mascot.width;

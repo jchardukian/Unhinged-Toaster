@@ -23,3 +23,10 @@ Also needed (configuration, not files):
 - Confirmation of the exact handle text for the watermark (default `@theunhingedtoaster`).
 
 Regenerate placeholders with `npm run brand:generate` (requires Python 3 + Pillow).
+
+## Current status (iteration 5)
+The channel's real avatar art (`channel_avatar_source.png`, pulled from the connected YouTube channel) now drives the
+branding: `mascot.png` (round badge of the toaster), `logo.png` (round badge of the full avatar), `wordmark.png`
+("THE UNHINGED TOASTER" title cut from the avatar, play button removed), `colors.json`, and the generated burst
+background in the same black/red/yellow style. Still welcome if you have them: a transparent-background mascot
+(no badge ring), `mascot_shout.png`, and `background_loop.mp4`.

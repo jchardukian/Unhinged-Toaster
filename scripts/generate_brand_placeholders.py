@@ -21,17 +21,26 @@ YELLOW = (255, 212, 0, 255)
 WHITE = (255, 255, 255, 255)
 
 
-def burst(size=2400, rays=36):
-    """Comic 'speed lines' sunburst with halftone dots: the animated background's source frame."""
-    img = Image.new("RGBA", (size, size), RED)
+def burst(size=2400, rays=40):
+    """Brand-style burst (black base, red rays, yellow brush spikes, halftone): the animated background's source frame."""
+    img = Image.new("RGBA", (size, size), BLACK)
     d = ImageDraw.Draw(img)
     c = size / 2
     r = size
+    rnd0 = random.Random(11)
     for i in range(rays):
         a0 = (2 * math.pi / rays) * i
-        a1 = a0 + (2 * math.pi / rays) * 0.5
-        col = DARK_RED if i % 2 else RED
+        w = (2 * math.pi / rays) * rnd0.uniform(0.25, 0.55)
+        a1 = a0 + w
+        col = RED if i % 2 else DARK_RED
         d.polygon([(c, c), (c + r * math.cos(a0), c + r * math.sin(a0)), (c + r * math.cos(a1), c + r * math.sin(a1))], fill=col)
+    # yellow brush spikes, shorter and jagged, like the channel art
+    for i in range(rays):
+        a0 = (2 * math.pi / rays) * i + rnd0.uniform(-0.03, 0.03)
+        w = (2 * math.pi / rays) * rnd0.uniform(0.10, 0.22)
+        ln = r * rnd0.uniform(0.28, 0.62)
+        pts = [(c + 60 * math.cos(a0 + w / 2), c + 60 * math.sin(a0 + w / 2)), (c + ln * math.cos(a0), c + ln * math.sin(a0)), (c + ln * 0.9 * math.cos(a0 + w), c + ln * 0.9 * math.sin(a0 + w))]
+        d.polygon(pts, fill=YELLOW)
     # halftone dots, denser toward the edges
     rnd = random.Random(7)
     step = 26
@@ -40,7 +49,7 @@ def burst(size=2400, rays=36):
             dist = math.hypot(x - c, y - c) / c
             rad = max(0, (dist - 0.25)) * 7
             if rad > 1.2:
-                d.ellipse([x - rad, y - rad, x + rad, y + rad], fill=(17, 17, 17, 110))
+                d.ellipse([x - rad, y - rad, x + rad, y + rad], fill=(38, 38, 38, 255))
     # vignette
     vign = Image.new("L", (size, size), 0)
     vd = ImageDraw.Draw(vign)

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildAss, assColor } from '../src/steps/captions.js';
+import { buildAss, assColor, isHallucination } from '../src/steps/captions.js';
 import { validate, fallback } from '../src/steps/copy.js';
 import { isoDurationSec, parseRedditCandidate } from '../src/steps/discover.js';
 import { postText } from '../src/steps/publish.js';
@@ -92,4 +92,12 @@ test('JsonStore round-trips candidates, patches, posts and weights', async () =>
 test('parseJson tolerates code fences and prose', () => {
   assert.deepEqual(parseJson('```json\n{"a":1}\n```'), { a: 1 });
   assert.deepEqual(parseJson('Sure! {"a":2} hope that helps'), { a: 2 });
+});
+
+test('isHallucination drops Whisper artefacts and keeps real speech', () => {
+  const w = (n: number) => Array.from({ length: n }, (_, i) => ({ word: 'x', start: i * 0.4, end: i * 0.4 + 0.3 }));
+  assert.equal(isHallucination('ぽんぽこ ぽんぽこ ぽんぽこ ぽんぽこ', w(4)), 'non_latin_script');
+  assert.equal(isHallucination('Thanks for watching!', w(3)), 'stock_phrase');
+  assert.equal(isHallucination('no no no no no no no no', w(8)), 'repetitive');
+  assert.equal(isHallucination('Okay watch this, the dog is about to steal the pizza', w(10)), null);
 });
