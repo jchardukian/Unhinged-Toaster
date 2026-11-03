@@ -24,6 +24,7 @@ export async function discoverAll(cfg: Config, opts: DiscoverOptions): Promise<C
         : s === 'pixabay' ? await discoverPixabay(cfg, opts.limitPerSource)
         : s === 'internet_archive' ? await discoverInternetArchive(cfg, opts.limitPerSource)
         : s === 'youtube_trending' ? await discoverYouTubeTrending(cfg, opts.limitPerSource)
+        : s === 'reddit_rss' ? await discoverRedditRss(cfg, opts.limitPerSource)
         : [];
       log.info(`discover:${s} -> ${found.length} candidates`);
       out.push(...found);
@@ -218,6 +219,70 @@ async function redditToken(cfg: Config): Promise<string> {
   if (!res.ok) throw new Error(`reddit token ${res.status}`);
   const j = (await res.json()) as { access_token: string };
   return j.access_token;
+}
+
+/**
+ * Credential-free Reddit discovery via the public Atom feeds (`/r/<sub>/top/.rss?t=day`), which stay reachable where
+ * the JSON API refuses unauthenticated datacenter traffic. The feed carries title, poster, permalink and the v.redd.it
+ * media id; score/comment counts are not included, so a rank-based proxy is stored and the LLM rubric carries the
+ * weight. Used automatically when no Reddit app credentials are configured.
+ */
+export async function discoverRedditRss(cfg: Config, limit: number, window: 'day' | 'week' = 'day'): Promise<Candidate[]> {
+  const now = new Date().toISOString();
+  const out: Candidate[] = [];
+  const ua = cfg.reddit.userAgent.includes('Mozilla') ? cfg.reddit.userAgent : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+  for (const { sub, category } of REDDIT_SOURCES) {
+    let xml: string;
+    try {
+      const res = await withRetry(`reddit rss r/${sub}`, async () => {
+        const r = await fetch(`https://www.reddit.com/r/${sub}/top/.rss?t=${window}&limit=${Math.min(100, limit)}`, { headers: { 'user-agent': ua, accept: 'application/atom+xml,application/xml' } });
+        if (r.status === 429 || r.status >= 500) throw new Error(`reddit rss ${r.status}`);
+        return r;
+      }, { attempts: 3, baseMs: 2500 });
+      if (!res.ok) { log.warn(`reddit rss r/${sub} -> ${res.status}`); continue; }
+      xml = await res.text();
+    } catch (e) { log.warn(`reddit rss r/${sub} failed: ${(e as Error).message}`); continue; }
+    const entries = parseRedditAtom(xml);
+    entries.forEach((e, rank) => {
+      if (!e.mediaId) return;
+      out.push({
+        ...base('reddit', now),
+        source_id: e.postId, source_url: e.link, media_url: `https://v.redd.it/${e.mediaId}/DASH_1080.mp4`,
+        author: e.author, author_url: e.author ? `https://www.reddit.com/user/${e.author}` : null,
+        title: e.title, description: `r/${sub} (top of ${window}, rank ${rank + 1}; stats unavailable via RSS)`, category,
+        duration_sec: null, width: null, height: null, published_at: e.published,
+        views: null, likes: Math.max(50, Math.round(3000 / (rank + 1))), comments: null, shares: null, engagement_velocity: null, // rank proxy only
+        ...initialRights('reddit', {}),
+      });
+    });
+    await sleep(1200);
+  }
+  return out;
+}
+
+export interface RedditAtomEntry { postId: string; title: string; link: string; author: string | null; published: string | null; mediaId: string | null }
+
+export function parseRedditAtom(xml: string): RedditAtomEntry[] {
+  const out: RedditAtomEntry[] = [];
+  const entryRe = /<entry>([\s\S]*?)<\/entry>/g;
+  let m: RegExpExecArray | null;
+  while ((m = entryRe.exec(xml))) {
+    const e = m[1];
+    const title = decodeXml(e.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? '');
+    const link = e.match(/<link href="([^"]+)"/)?.[1] ?? '';
+    const author = e.match(/<name>\/u\/([^<]+)<\/name>/)?.[1] ?? null;
+    const published = e.match(/<published>([^<]+)<\/published>/)?.[1] ?? null;
+    const content = decodeXml(e.match(/<content[^>]*>([\s\S]*?)<\/content>/)?.[1] ?? '');
+    const mediaId = content.match(/https:\/\/v\.redd\.it\/([a-z0-9]+)/)?.[1] ?? null;
+    const postId = link.match(/\/comments\/([a-z0-9]+)/)?.[1] ?? '';
+    if (postId && title) out.push({ postId, title, link, author, published, mediaId });
+  }
+  return out;
+}
+
+function decodeXml(s: string): string {
+  return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)));
 }
 
 export async function discoverReddit(cfg: Config, limit: number): Promise<Candidate[]> {

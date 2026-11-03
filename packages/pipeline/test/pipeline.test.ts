@@ -101,3 +101,30 @@ test('isHallucination drops Whisper artefacts and keeps real speech', () => {
   assert.equal(isHallucination('no no no no no no no no', w(8)), 'repetitive');
   assert.equal(isHallucination('Okay watch this, the dog is about to steal the pizza', w(10)), null);
 });
+
+test('parseRedditAtom extracts post id, author, permalink and v.redd.it media id from the public feed', async () => {
+  const { parseRedditAtom } = await import('../src/steps/discover.js');
+  const xml = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><author><name>/u/someone</name></author>
+<content type="html">&lt;a href="https://v.redd.it/abc123xyz"&gt;[link]&lt;/a&gt;</content><id>t3_1xhqbt0</id>
+<link href="https://www.reddit.com/r/Unexpected/comments/1xhqbt0/either_way_counts/" /><published>2026-11-01T10:00:00+00:00</published>
+<title>Either way counts &amp; more</title></entry><entry><title>Text post</title><link href="https://www.reddit.com/r/x/comments/zzz/t/" /><content type="html">no video</content></entry></feed>`;
+  const e = parseRedditAtom(xml);
+  assert.equal(e.length, 2);
+  assert.equal(e[0].postId, '1xhqbt0');
+  assert.equal(e[0].author, 'someone');
+  assert.equal(e[0].mediaId, 'abc123xyz');
+  assert.equal(e[0].title, 'Either way counts & more');
+  assert.equal(e[1].mediaId, null);
+});
+
+test('parseRedditMpd picks the highest video rendition and audio from the DASH manifest', async () => {
+  const { parseRedditMpd } = await import('../src/steps/media.js');
+  const mpd = `<MPD><Period><AdaptationSet><Representation bandwidth="230432" height="390" width="220"><BaseURL>CMAF_220.mp4</BaseURL></Representation>
+<Representation bandwidth="1712576" height="1280" width="720"><BaseURL>CMAF_720.mp4</BaseURL></Representation>
+<Representation bandwidth="712576" height="638" width="360"><BaseURL>CMAF_360.mp4</BaseURL></Representation></AdaptationSet>
+<AdaptationSet><Representation bandwidth="69121"><BaseURL>CMAF_AUDIO_64.mp4</BaseURL></Representation><Representation bandwidth="134591"><BaseURL>CMAF_AUDIO_128.mp4</BaseURL></Representation></AdaptationSet></Period></MPD>`;
+  const r = parseRedditMpd(mpd);
+  assert.equal(r.video[0].file, 'CMAF_720.mp4');
+  assert.equal(r.video[0].height, 1280);
+  assert.equal(r.audio[0], 'CMAF_AUDIO_128.mp4');
+});

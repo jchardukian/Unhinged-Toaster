@@ -81,7 +81,7 @@ overlapping; landscape/square sources run **full-width** in the upper-middle wit
 Punch-in zoom is 1.10 and replay zoom 1.05 so the subject never leaves the frame. Upscales above 1.15× get gentle
 sharpening. **Quality gate** (`shared/quality.ts`): 1080p-class sources (≥ 1080 px across the stretched dimension) are
 required; 720p-class sources are used only when 1080p stock cannot fill the week; anything lower is `rejected_quality`.
-Reddit downloads take the highest DASH rendition; yt-dlp takes best video up to 4K. Then: ASS karaoke captions → reaction sticker → optional outro (spoken commentary, text-only, or none when
+Reddit downloads parse the DASH manifest and take the highest rendition (Reddit's ladder often stops at 720p, which the gate accepts when nothing sharper exists); yt-dlp takes best video up to 4K. Discovery works without Reddit credentials through the public Atom feeds (`reddit_rss`), with a rank-based engagement proxy. Then: ASS karaoke captions → reaction sticker → optional outro (spoken commentary, text-only, or none when
 the clip's own sound is the joke – the LLM director decides, `COMMENTARY_DEFAULT` overrides) → watermark + handle →
 bobbing mascot. Template geometry lives in `template/template.json`.
 

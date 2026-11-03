@@ -200,7 +200,7 @@ async function discoverInto(cfg: Config, store: Store, sources: SourceAdapter[],
 function defaultSources(cfg: Config): string {
   if (cfg.sources) return cfg.sources;
   const s: string[] = [];
-  if (cfg.reddit.clientId && cfg.transformationReview) s.push('reddit');
+  if (cfg.transformationReview) s.push(cfg.reddit.clientId ? 'reddit' : 'reddit_rss');
   if (cfg.youtubeKey && cfg.enableYoutubeTransform && cfg.transformationReview) s.push('youtube_trending');
   if (cfg.youtubeKey && cfg.enableYoutubeCc) s.push('youtube');
   if (cfg.pixabayKey) s.push('pixabay');
@@ -231,7 +231,7 @@ function doctor(cfg: Config) {
   check('Pixabay key (auto-clearable source)', !!cfg.pixabayKey, 'PIXABAY_API_KEY (free)');
   check('Pexels key (auto-clearable source)', !!cfg.pexelsKey, 'PEXELS_API_KEY (free)');
   check('YouTube CC source', !!cfg.youtubeKey && cfg.enableYoutubeCc, 'YOUTUBE_API_KEY + ENABLE_YOUTUBE_CC=true (read docs/SOURCES.md first)');
-  check('Reddit app (viral source, transformation review)', !!cfg.reddit.clientId, 'REDDIT_CLIENT_ID/SECRET (free script app)');
+  check('Reddit app (viral source, transformation review)', !!cfg.reddit.clientId, 'optional: without it the public RSS feeds are used (no scores, rank proxy)');
   check('YouTube trending (transformation review)', !!cfg.youtubeKey && cfg.enableYoutubeTransform, 'YOUTUBE_API_KEY + ENABLE_YOUTUBE_TRANSFORM=true');
   check(`Transformation review ${cfg.transformationReview ? 'ON' : 'OFF'} (max risk ${cfg.maxCopyrightRisk})`, true);
   check('R2 credentials', !!(cfg.r2.accountId && cfg.r2.accessKeyId && cfg.r2.publicBaseUrl), 'R2_* vars; Buffer needs a public video URL');

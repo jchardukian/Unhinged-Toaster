@@ -6,6 +6,7 @@ import { phashFrame, type Candidate } from '@toaster/shared';
 import { log } from '../config.js';
 
 const execFileP = promisify(execFile);
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 export interface Probe { duration: number; width: number; height: number; hasAudio: boolean; fps: number }
 
@@ -78,31 +79,66 @@ export async function downloadMedia(c: Candidate, dir: string): Promise<string> 
 }
 
 async function downloadReddit(c: Candidate, out: string): Promise<string> {
-  if (!c.media_url) throw new Error('reddit candidate without fallback_url');
-  const videoUrl = c.media_url.split('?')[0];
-  const baseUrl = videoUrl.replace(/\/[^/]+$/, '');
+  if (!c.media_url) throw new Error('reddit candidate without media url');
+  const baseUrl = c.media_url.split('?')[0].replace(/\/[^/]+$/, ''); // https://v.redd.it/<id>
   const v = out.replace(/\.mp4$/, '.v.mp4');
-  // Always take the highest DASH rendition Reddit has; fallback_url is not always the best one.
-  let got = false;
-  for (const name of ['DASH_1080.mp4', 'DASH_720.mp4']) {
-    if (videoUrl.endsWith('/' + name)) break;
-    try {
-      await fetchToFile(`${baseUrl}/${name}`, v, { 'user-agent': 'unhinged-toaster/0.1' });
-      if (fs.statSync(v).size > 50_000) { got = true; log.info(`reddit: using ${name}`); break; }
-    } catch { /* rendition not available */ }
+  const a = out.replace(/\.mp4$/, '.a.mp4');
+  // Reddit publishes a DASH manifest listing the real rendition files (CMAF_1080.mp4, DASH_720.mp4, ...). Parse it and
+  // take the highest video + audio instead of guessing names; direct guesses fall back when the manifest is unavailable.
+  const renditions = await redditRenditions(baseUrl).catch(() => null);
+  let videoName: string | null = null;
+  let audioName: string | null = null;
+  if (renditions) {
+    videoName = renditions.video[0]?.file ?? null;
+    audioName = renditions.audio[0] ?? null;
+    if (renditions.video[0]) log.info(`reddit: manifest offers ${renditions.video.map((r) => `${r.width}x${r.height}`).join(', ')} -> using ${videoName}`);
   }
-  if (!got) await fetchToFile(videoUrl, v, { 'user-agent': 'unhinged-toaster/0.1' });
-  let a: string | null = null;
-  for (const name of ['DASH_AUDIO_128.mp4', 'DASH_AUDIO_64.mp4', 'DASH_audio.mp4', 'audio']) {
-    const target = out.replace(/\.mp4$/, '.a.mp4');
+  const videoCandidates = [videoName, 'CMAF_1080.mp4', 'DASH_1080.mp4', 'CMAF_720.mp4', 'DASH_720.mp4', c.media_url.split('?')[0].split('/').pop()].filter((x): x is string => !!x);
+  let gotVideo = false;
+  for (const name of [...new Set(videoCandidates)]) {
     try {
-      await fetchToFile(`${baseUrl}/${name}`, target, { 'user-agent': 'unhinged-toaster/0.1' });
-      if (fs.statSync(target).size > 1000) { a = target; break; }
-    } catch { /* try next */ }
+      await fetchToFile(`${baseUrl}/${name}`, v, { 'user-agent': BROWSER_UA, referer: 'https://www.reddit.com/' });
+      if (fs.statSync(v).size > 50_000) { gotVideo = true; break; }
+    } catch { /* next */ }
   }
-  if (a) await run('ffmpeg', ['-y', '-v', 'error', '-i', v, '-i', a, '-c', 'copy', '-map', '0:v:0', '-map', '1:a:0', '-shortest', out]);
+  if (!gotVideo) throw new Error('reddit: no downloadable video rendition');
+  let gotAudio = false;
+  for (const name of [...new Set([audioName, 'CMAF_AUDIO_128.mp4', 'DASH_AUDIO_128.mp4', 'CMAF_AUDIO_64.mp4', 'DASH_AUDIO_64.mp4', 'DASH_audio.mp4'].filter((x): x is string => !!x))]) {
+    try {
+      await fetchToFile(`${baseUrl}/${name}`, a, { 'user-agent': BROWSER_UA, referer: 'https://www.reddit.com/' });
+      if (fs.statSync(a).size > 1000) { gotAudio = true; break; }
+    } catch { /* next */ }
+  }
+  if (gotAudio) await run('ffmpeg', ['-y', '-v', 'error', '-i', v, '-i', a, '-c', 'copy', '-map', '0:v:0', '-map', '1:a:0', '-shortest', out]);
   else await run('ffmpeg', ['-y', '-v', 'error', '-i', v, '-c', 'copy', out]);
   return out;
+}
+
+/** Parse v.redd.it DASHPlaylist.mpd: video renditions (best first) and audio files (best first). */
+export async function redditRenditions(baseUrl: string): Promise<{ video: { file: string; width: number; height: number; bandwidth: number }[]; audio: string[] }> {
+  const res = await fetch(`${baseUrl}/DASHPlaylist.mpd`, { headers: { 'user-agent': BROWSER_UA, referer: 'https://www.reddit.com/' } });
+  if (!res.ok) throw new Error(`mpd ${res.status}`);
+  return parseRedditMpd(await res.text());
+}
+
+export function parseRedditMpd(xml: string): { video: { file: string; width: number; height: number; bandwidth: number }[]; audio: string[] } {
+  const video: { file: string; width: number; height: number; bandwidth: number }[] = [];
+  const audio: { file: string; bandwidth: number }[] = [];
+  const repRe = /<Representation\b([^>]*)>([\s\S]*?)<\/Representation>/g;
+  let m: RegExpExecArray | null;
+  while ((m = repRe.exec(xml))) {
+    const attrs = m[1];
+    const file = m[2].match(/<BaseURL>([^<]+)<\/BaseURL>/)?.[1];
+    if (!file) continue;
+    const width = Number(attrs.match(/width="(\d+)"/)?.[1] ?? 0);
+    const height = Number(attrs.match(/height="(\d+)"/)?.[1] ?? 0);
+    const bandwidth = Number(attrs.match(/bandwidth="(\d+)"/)?.[1] ?? 0);
+    if (width && height) video.push({ file, width, height, bandwidth });
+    else audio.push({ file, bandwidth });
+  }
+  video.sort((x, y) => y.height * y.width - x.height * x.width || y.bandwidth - x.bandwidth);
+  audio.sort((x, y) => y.bandwidth - x.bandwidth);
+  return { video, audio: audio.map((x) => x.file) };
 }
 
 async function downloadWithYtDlp(url: string, out: string): Promise<string> {

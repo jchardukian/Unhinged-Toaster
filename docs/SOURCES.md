@@ -27,7 +27,7 @@ owner decision for footage that has no license on file. Implemented as a separat
 
 | Source | Default | Rights path | Automated download |
 |---|---|---|---|
-| Reddit top-of-day (12 subreddits) | **on** when a free Reddit script app is configured | transformation review | yes (v.redd.it video + audio, merged) |
+| Reddit top-of-day (12 subreddits) | **on by default** – OAuth API when a free script app is configured, otherwise the public Atom feeds (`/r/<sub>/top/.rss`, no credentials; verified from a datacenter IP) | transformation review | yes: v.redd.it DASH manifest → highest rendition (`CMAF_1080/720.mp4`) + `CMAF_AUDIO_128.mp4`, merged. Note: Reddit's CDN ladder tops out at 720p for many posts, so Reddit footage is often 720p-class even when the original was sharper. |
 | YouTube most-popular chart (Comedy / Pets / Entertainment, Shorts-length) | opt-in `ENABLE_YOUTUBE_TRANSFORM=true` | transformation review (CC BY + low provenance → cleared) | yt-dlp (YouTube ToS caveat) |
 | YouTube CC search | opt-in `ENABLE_YOUTUBE_CC=true` | cleared only with low provenance risk | yt-dlp |
 | Pixabay / Pexels / Internet Archive | on when keys exist | cleared | yes |
