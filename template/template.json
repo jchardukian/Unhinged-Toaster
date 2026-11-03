@@ -18,7 +18,7 @@
   "clip": { "maxWidth": 1080, "maxHeight": 1920, "coverIfTallerThan": 1440, "landscapeCenterY": 900, "minTop": 440, "frameWidth": 10, "shadowOffset": 14 },
   "captions": { "fontSize": 74, "bottomPadding": 70, "coverMarginV": 470, "activeColor": "#FFD400", "idleColor": "#FFFFFF", "outlineColor": "#111111" },
   "mascot": { "width": 330, "coverWidth": 240, "right": 24, "bottom": 10, "bobAmplitude": 10, "bobSpeed": 3 },
-  "watermark": { "logoWidth": 72, "x": 30, "y": 1812, "fontSize": 44, "wordmarkWidth": 330, "wordmarkBottom": 24 },
+  "watermark": { "logoWidth": 72, "x": 30, "y": 1812, "fontSize": 44, "wordmarkWidth": 330, "wordmarkBottom": 36 },
   "commentary": { "position": "intro", "introDelay": 0.35, "duckVolume": 0.25, "outroSeconds": 3.2, "fontSize": 50, "boxColor": "#FFD400", "textColor": "#111111", "y": 1500, "maxCharsPerLine": 26, "maxLines": 3 },
   "audio": { "musicVolume": 0.10, "musicDuck": 0.35, "voVolume": 1.5, "loudnorm": "I=-14:TP=-1.5:LRA=11" },
   "limits": { "maxDurationSec": 59 }
