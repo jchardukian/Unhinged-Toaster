@@ -206,4 +206,8 @@ export interface CopyResult {
   sticker?: string;      // 1-3 word comic reaction shown at the peak moment ("NOPE.", "WHY.", "OH NO")
   freeze_text?: string;  // short text for the pre-peak freeze frame ("WAIT FOR IT…")
   edit_style?: 'full' | 'light';  // light = fewer beats (clip is already very short or dialogue-driven)
+  commentary_mode?: CommentaryMode; // whether the toaster speaks at all: the clip's own sound is often the joke
 }
+
+/** outro_voice = spoken + on-screen line after the clip; text_only = on-screen line, no voice; none = let the clip's sound land. */
+export type CommentaryMode = 'outro_voice' | 'text_only' | 'none';

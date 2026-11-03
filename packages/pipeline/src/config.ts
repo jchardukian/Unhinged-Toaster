@@ -41,6 +41,10 @@ export interface Config {
   tz: string;
   publishSlots: string;
   approvalMode: 'draft' | 'needs_approval';
+  bufferTagReviewId: string | undefined;
+  bufferTagClearedId: string | undefined;
+  contactEmail: string;
+  commentaryDefault: 'auto' | 'always' | 'never';
   youtubeKey: string | undefined;
   enableYoutubeCc: boolean;
   enableYoutubeTransform: boolean;
@@ -78,6 +82,10 @@ export function loadConfig(): Config {
     tz: e.BUFFER_TIMEZONE ?? 'America/Chicago',
     publishSlots: e.PUBLISH_SLOTS ?? '11:00,15:00,19:00',
     approvalMode: (e.BUFFER_APPROVAL_MODE as 'draft' | 'needs_approval') ?? 'draft',
+    bufferTagReviewId: e.BUFFER_TAG_REVIEW_ID || undefined,
+    bufferTagClearedId: e.BUFFER_TAG_CLEARED_ID || undefined,
+    contactEmail: e.CONTACT_EMAIL || 'theunhingedtoaster@gmail.com',
+    commentaryDefault: (['auto', 'always', 'never'].includes(e.COMMENTARY_DEFAULT ?? '') ? e.COMMENTARY_DEFAULT : 'auto') as 'auto' | 'always' | 'never',
     youtubeKey: e.YOUTUBE_API_KEY,
     enableYoutubeCc: e.ENABLE_YOUTUBE_CC === 'true',
     enableYoutubeTransform: e.ENABLE_YOUTUBE_TRANSFORM === 'true',

@@ -36,7 +36,8 @@ Rights
   rights:deny <id> [--reason TEXT]
 
 Utilities
-  demo [--offline]          render a synthetic clip through the full template (smoke test)
+  demo [--offline] [--vertical] [--commentary outro_voice|text_only|none]   render a synthetic clip through the template
+  buffer:tags               list Buffer tags (best effort) to fill BUFFER_TAG_REVIEW_ID / BUFFER_TAG_CLEARED_ID
   brand:generate            create placeholder brand assets
   doctor                    check tools and configuration
 `;
@@ -134,6 +135,21 @@ async function main() {
       return;
     }
     case 'status': return status(store);
+    case 'buffer:tags': {
+      const { bufferClient } = await import('./steps/publish.js');
+      const client = bufferClient(cfg);
+      // Not covered by Buffer's guides; the changelog lists Query.tagsV2. Reported verbatim on failure.
+      try {
+        const d = await client.gql<{ tagsV2: { edges?: { node: { id: string; name: string } }[] } | { id: string; name: string }[] }>(
+          `query($organizationId: OrganizationId!) { tagsV2(input: { organizationId: $organizationId }) { ... on TagConnection { edges { node { id name } } } } }`, { organizationId: cfg.bufferOrgId });
+        const list = Array.isArray(d.tagsV2) ? d.tagsV2 : (d.tagsV2.edges ?? []).map((e) => e.node);
+        for (const tg of list) console.log(`${tg.id}  ${tg.name}`);
+        if (list.length === 0) console.log('no tags found; create "REVIEW" and "CLEARED" tags in Buffer (Settings > Tags) and re-run');
+      } catch (e) {
+        console.log(`tags query failed (${(e as Error).message.slice(0, 200)}). Create tags "REVIEW" and "CLEARED" in Buffer > Settings > Tags, then copy their ids from the tag URL into BUFFER_TAG_REVIEW_ID / BUFFER_TAG_CLEARED_ID.`);
+      }
+      return;
+    }
     case 'rights:outreach': {
       const cands = (await store.listCandidates({ status: ['scored'] })).filter((c) => c.rights_status === 'unknown').slice(0, Number(flags.top ?? 20));
       for (const c of cands) {
@@ -221,6 +237,9 @@ function doctor(cfg: Config) {
   check('R2 credentials', !!(cfg.r2.accountId && cfg.r2.accessKeyId && cfg.r2.publicBaseUrl), 'R2_* vars; Buffer needs a public video URL');
   check('Control-plane API', !!(cfg.apiUrl && cfg.apiToken), 'TOASTER_API_URL/TOKEN (falls back to work/db.json)');
   check('Alert webhook', !!process.env.ALERT_WEBHOOK_URL, 'ALERT_WEBHOOK_URL (optional; GitHub issues + step summary still work in Actions)');
+  check('Buffer review tag', !!cfg.bufferTagReviewId, 'BUFFER_TAG_REVIEW_ID (optional: marks review-path drafts in the Buffer UI; the readiness report lists them regardless)');
+  check(`Contact e-mail in credits: ${cfg.contactEmail}`, true);
+  check(`Commentary default: ${cfg.commentaryDefault}`, true);
   check('Brand: mascot.png', fs.existsSync(path.join(cfg.assetsDir, 'brand', 'mascot.png')), 'using placeholder');
   check('Brand: background_loop.mp4', fs.existsSync(path.join(cfg.assetsDir, 'brand', 'background_loop.mp4')), 'using procedural sunburst');
   check('Font', fs.existsSync(path.join(cfg.templateDir, 'fonts', 'Bangers-Regular.ttf')));

@@ -17,7 +17,7 @@ import { syncBuffer } from '../src/steps/sync.js';
 import { readinessReport } from '../src/steps/report.js';
 
 // ---------------------------------------------------------------- fake Buffer
-interface FakePost { id: string; status: string; text: string; dueAt: string | null; channelId: string; error?: { message: string } | null }
+interface FakePost { id: string; status: string; text: string; dueAt: string | null; channelId: string; tagIds?: string[]; error?: { message: string } | null }
 class FakeBuffer {
   posts = new Map<string, FakePost>();
   createCalls = 0;
@@ -36,7 +36,7 @@ class FakeBuffer {
       this.createCalls++;
       const id = (++this.seq).toString(16).padStart(24, '0');
       const dueAt = new Date(input.dueAt).toISOString();
-      this.posts.set(id, { id, status: 'draft', text: input.text, dueAt, channelId: input.channelId });
+      this.posts.set(id, { id, status: 'draft', text: input.text, dueAt, channelId: input.channelId, tagIds: input.tagIds });
       if (this.failNextCreateWithTimeoutButCreate) { this.failNextCreateWithTimeoutButCreate = false; return new Response('gateway timeout', { status: 504 }); }
       return json({ data: { createPost: { __typename: 'PostActionSuccess', post: this.posts.get(id) } } });
     }
@@ -74,7 +74,7 @@ function makeCfg(): Config {
   return {
     llmProvider: 'openai', llmModel: 'x', openaiKey: undefined, anthropicKey: undefined, transcribeModel: 'whisper-1', elevenKey: undefined, elevenVoiceId: undefined, elevenModelId: 'x',
     bufferKey: 'test-key', bufferOrgId: 'o'.repeat(24), bufferYoutubeChannelId: 'y'.repeat(24), bufferTiktokChannelId: 't'.repeat(24), tz: 'America/Chicago', publishSlots: '11:00,15:00,19:00',
-    approvalMode: 'draft', youtubeKey: undefined, enableYoutubeCc: false, sources: undefined, reddit: { userAgent: 'x' }, pexelsKey: undefined, pixabayKey: undefined,
+    approvalMode: 'draft', bufferTagReviewId: 'r'.repeat(24), bufferTagClearedId: 'k'.repeat(24), contactEmail: 'theunhingedtoaster@gmail.com', commentaryDefault: 'auto', youtubeKey: undefined, enableYoutubeCc: false, sources: undefined, reddit: { userAgent: 'x' }, pexelsKey: undefined, pixabayKey: undefined,
     r2: { bucket: 'b' }, apiUrl: undefined, apiToken: undefined, workDir: fs.mkdtempSync(path.join(os.tmpdir(), 'toaster-int-')), assetsDir: '', templateDir: '',
   };
 }
@@ -215,16 +215,18 @@ test('transformation-review drafts are labelled, viral-first ordered, and the no
   const first = posts.filter((p) => p.slot_at === plan.slots[0].slot_at);
   assert.equal(first[0].production_id, 'P0', 'highest-scoring (viral) production fills the first slot');
   const yt = first.find((p) => p.service === 'youtube')!;
-  assert.equal(yt.reuse_uncertain, true);
+  assert.equal(yt.reuse_uncertain, true, 'review status is tracked internally');
   const draft = fake.posts.get(yt.buffer_post_id!)!;
-  assert.ok(draft.text.startsWith(REVIEW_BLOCK_START), 'review note is the first thing the owner sees');
-  assert.match(draft.text, /Reuse basis: NONE on file/);
-  assert.match(draft.text, /reddit\.com\/r\/funny/);
-  assert.match(draft.text, /not a license/);
+  assert.equal(draft.text.includes(REVIEW_BLOCK_START), false, 'public caption carries no internal review text');
+  assert.doesNotMatch(draft.text, /review|copyright risk|fair use/i);
+  assert.match(draft.text, /🎬 Original clip: u\/poster0 — https:\/\/www\.reddit\.com\/r\/funny/);
+  assert.match(draft.text, /theunhingedtoaster@gmail\.com/);
+  assert.equal(draft.tagIds?.[0], 'r'.repeat(24), 'review drafts get the internal REVIEW tag');
   assert.equal(draft.status, 'draft');
   const clearedPost = posts.find((p) => p.production_id === 'P1')!;
   assert.equal(clearedPost.reuse_uncertain, false);
-  assert.equal(fake.posts.get(clearedPost.buffer_post_id!)!.text.includes(REVIEW_BLOCK_START), false);
+  assert.equal(fake.posts.get(clearedPost.buffer_post_id!)!.tagIds?.[0], 'k'.repeat(24), 'cleared drafts get the CLEARED tag');
+  assert.match(fake.posts.get(clearedPost.buffer_post_id!)!.text, /Pixabay/);
 
   // owner approves the review draft on YouTube
   draft.status = 'scheduled';
@@ -232,17 +234,23 @@ test('transformation-review drafts are labelled, viral-first ordered, and the no
   const s = await syncBuffer(cfg, store, { client, now });
   assert.equal(s.approved, 1);
   assert.equal(s.errors.length, 0);
-  assert.equal(fake.posts.get(yt.buffer_post_id!)!.text.includes(REVIEW_BLOCK_START), false, 'note removed from the public caption');
+  assert.equal(fake.editCalls.filter((e) => e.text !== undefined).length, 0, 'no caption edit needed: captions were clean from the start');
   assert.equal(fake.posts.get(yt.buffer_post_id!)!.text, yt.public_text);
   const cand = (await store.getCandidate('C0'))!;
   assert.equal(cand.rights_status, 'owner_reviewed');
   assert.equal(cand.rights_basis, 'owner_transformative_use');
   assert.match(cand.rights_evidence ?? '', /Owner approved Buffer youtube post/);
-  assert.equal((await store.listPosts()).find((p) => p.id === yt.id)!.review_block_stripped, true);
-  // the TikTok twin is still an unapproved draft with its note intact
+  // the TikTok twin is still an unapproved draft (independent)
   const tt = first.find((p) => p.service === 'tiktok')!;
-  assert.ok(fake.posts.get(tt.buffer_post_id!)!.text.startsWith(REVIEW_BLOCK_START));
-  const { report } = await readinessReport(cfg, store, 'next', now());
+  assert.equal((await store.listPosts()).find((p) => p.id === tt.id)!.state, 'draft');
+  const { report, markdown } = await readinessReport(cfg, store, 'next', now());
   assert.equal(report.videos_ready_review, 2);
   assert.equal(report.videos_ready_cleared, 2);
+  assert.equal(report.review_items.length, 2, 'internal report lists every review-path video');
+  const item = report.review_items.find((i) => i.production_id === 'P0')!;
+  assert.equal(item.copyright_risk, 'low');
+  assert.deepEqual(item.services.map((x) => x.service).sort(), ['tiktok', 'youtube']);
+  assert.match(markdown, /Transformation-review drafts \(2\)/);
+  assert.match(markdown, /never appears in a public caption/);
+  assert.equal(report.cleared_items.length, 2);
 });

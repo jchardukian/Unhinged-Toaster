@@ -52,13 +52,23 @@ test('isoDurationSec and reddit parsing', () => {
   assert.equal(c.status, 'discovered');
 });
 
-test('postText adds hashtags, attribution and AI disclosure within limits', () => {
-  const p: Production = { id: 'p', candidate_id: 'c', headline: 'H', commentary: 'C', caption_text: 'Caption.\n\nOriginal video by @x (https://y), used under CC BY.', hashtags: JSON.stringify(['funny', 'dogs']), voice_id: null, music_track: null, r2_key: null, public_url: null, thumbnail_url: null, duration_sec: 10, render_log: null, created_at: '', updated_at: '' };
-  const t = postText(p, 'tiktok', true);
+test('postText: creator credit, source URL, edit summary, contact e-mail, hashtags, AI disclosure; never internal review text', () => {
+  const p: Production = { id: 'p', candidate_id: 'c', headline: 'H', commentary: 'C', caption_text: 'Caption.', hashtags: JSON.stringify(['funny', 'dogs']), voice_id: 'v', music_track: null, r2_key: null, public_url: null, thumbnail_url: null, duration_sec: 10, render_log: '{"vo":true}', created_at: '', updated_at: '' };
+  const review = { author: 'poster1', source_url: 'https://www.reddit.com/r/funny/comments/abc/x/', source_platform: 'reddit', rights_status: 'transformation_review', rights_basis: null, copyright_risk: 'medium', copyright_risk_reasons: '["x"]' } as Candidate;
+  const t = postText(p, review, 'tiktok');
+  assert.match(t, /🎬 Original clip: u\/poster1 — https:\/\/www\.reddit\.com\/r\/funny\/comments\/abc\/x\//);
+  assert.match(t, /✂️ Edited by The Unhinged Toaster: original comedic commentary, cuts, zooms/);
+  assert.match(t, /📩 Copyright inquiries, credit corrections or removal requests: theunhingedtoaster@gmail\.com/);
   assert.match(t, /#funny #dogs/);
-  assert.match(t, /CC BY/);
   assert.match(t, /AI-generated/);
+  assert.doesNotMatch(t, /fair use|licen[cs]ed|authori[sz]ed|REVIEW|transformation review|copyright risk/i, 'no authorisation claim and no internal review text');
   assert.ok(t.length <= 2100);
+  const cleared = { ...review, rights_status: 'cleared', rights_basis: 'cc_by', source_platform: 'youtube', author: 'Jess & Biscuit' } as Candidate;
+  assert.match(postText(p, cleared, 'youtube'), /Creative Commons Attribution/);
+  assert.match(postText(p, cleared, 'youtube'), /Original clip: Jess & Biscuit/);
+  const noVoice = { ...p, voice_id: null, render_log: '{"vo":false}' };
+  assert.doesNotMatch(postText(noVoice, cleared, 'youtube'), /AI-generated/);
+  assert.throws(() => postText({ ...p, caption_text: 'x ⚠️ REVIEW BEFORE APPROVING y' }, cleared, 'youtube'), /never reach a public caption/);
 });
 
 test('JsonStore round-trips candidates, patches, posts and weights', async () => {

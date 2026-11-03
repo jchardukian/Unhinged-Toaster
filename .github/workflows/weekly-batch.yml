@@ -65,6 +65,10 @@ jobs:
           TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           BUFFER_APPROVAL_MODE: ${{ vars.BUFFER_APPROVAL_MODE }}
+          BUFFER_TAG_REVIEW_ID: ${{ vars.BUFFER_TAG_REVIEW_ID }}
+          BUFFER_TAG_CLEARED_ID: ${{ vars.BUFFER_TAG_CLEARED_ID }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+          COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT }}
           BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE }}
           PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS }}
         run: node packages/pipeline/dist/cli.js run-weekly ${{ inputs.dry_run && '--dry-run' || '' }}

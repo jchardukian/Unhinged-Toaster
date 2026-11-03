@@ -25,16 +25,18 @@ What the pipeline does with it:
    detected peak, slow-motion replay, reaction sticker, karaoke captions, original spoken commentary; the original
    audio is muted when the scorer flags commercial music.
 3. Attribution to the poster and source link is written into every description.
-4. The Buffer **draft** starts with a review note:
-   > ⚠️ REVIEW BEFORE APPROVING – Reuse basis: NONE on file … Copyright risk: … – transformation is not a license and
-   > does not guarantee fair use – approving records YOUR decision … delete the draft to reject.
-5. Nothing is published by the pipeline. If the **owner approves** the draft in Buffer:
-   - the candidate becomes `rights_status = owner_reviewed`, `rights_basis = owner_transformative_use`, with the Buffer
-     post id + timestamp as evidence. This is a *record of the owner's decision*, not a license, and it never becomes
-     `cleared`;
-   - the review note is removed from the public caption via `editPost` (verified; retried every poll until it succeeds
-     and reported as an error while it has not).
-6. If the owner deletes the draft, the candidate is `rejected_user` and never re-drafted into that slot.
+4. Review information is **internal only**: the weekly readiness report lists every review-path draft (slot,
+   headline, source, creator, copyright risk + reasons, Buffer post ids) and the draft carries an internal Buffer tag
+   (`BUFFER_TAG_REVIEW_ID`) when configured. Public captions never contain review text (`postText` throws if they would).
+5. Every public description credits the creator (name/handle when identifiable), links the source, summarises our
+   edits, and gives the contact address for copyright inquiries / credit corrections / removal
+   (`theunhingedtoaster@gmail.com`). It claims no license and no fair use for review-path footage; explicit bases
+   (CC BY, public domain, Pexels/Pixabay, permission, licensed) are stated when they exist.
+6. Nothing is published by the pipeline. If the **owner approves** the draft in Buffer, the candidate becomes
+   `rights_status = owner_reviewed`, `rights_basis = owner_transformative_use`, with the Buffer post id + timestamp as
+   evidence (approval metadata). This is a *record of the owner's decision*, not a license, and it never becomes
+   `cleared`.
+7. If the owner deletes the draft, the candidate is `rejected_user` and never re-drafted into that slot.
 
 ### What the policy deliberately does **not** do
 - It does not call Path-B footage "licensed", "cleared", or "fair use". Fair use is a legal judgement made case by

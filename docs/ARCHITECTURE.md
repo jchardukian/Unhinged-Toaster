@@ -74,10 +74,11 @@ Exact (normalised URL) → perceptual (64-bit DCT pHash on 5 sampled frames, mea
 
 ## Rendering (`packages/pipeline/src/steps/render.ts`)
 
-Single FFmpeg graph, 1080×1920 @ 30 fps, H.264 CRF 20, AAC 160k, loudnorm −14 LUFS:
-animated background (brand loop or procedurally rotated sunburst) → drop shadow → clip scaled into a 1000×1040 window
-with a yellow comic frame → headline in the speech-burst box (Bangers, auto-wrapped, auto-sized) → ASS karaoke captions
-(Whisper word timings; yellow active word) → outro freeze-frame with commentary box + ElevenLabs VO → watermark + handle →
+Single FFmpeg graph, 1080×1920 @ 30 fps, H.264 CRF 20, AAC 160k, loudnorm −14 LUFS. The footage owns the screen:
+near-vertical sources are rendered **full-bleed** (cover the whole canvas; headline box, captions, watermark and a smaller
+mascot overlap the footage), landscape/square sources run **full-width** in the upper-middle with the headline above and
+captions below. Then: ASS karaoke captions → reaction sticker → optional outro (spoken commentary, text-only, or none when
+the clip's own sound is the joke – the LLM director decides, `COMMENTARY_DEFAULT` overrides) → watermark + handle →
 bobbing mascot. Template geometry lives in `template/template.json`.
 
 ## Costs (estimate at 21 videos/week)

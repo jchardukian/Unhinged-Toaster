@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { attributionText, findDuplicate, planEdit, productionBasis, ulid, type Candidate, type Production, type RightsPolicy } from '@toaster/shared';
+import { creditText, findDuplicate, planEdit, productionBasis, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
 import { analyzeClip } from './analyze.js';
 import { log, type Config } from '../config.js';
 import type { Store } from '../store.js';
@@ -55,17 +55,19 @@ export async function produceCandidate(cfg: Config, store: Store, c: Candidate):
 
     // copy + edit direction
     const copy = await writeCopy(cfg, c, transcript?.text);
-    const vo = await synthesiseCommentary(cfg, copy.commentary, path.join(dir, 'vo.mp3'));
+    const commentaryMode: CommentaryMode = cfg.commentaryDefault === 'never' ? 'none' : cfg.commentaryDefault === 'always' ? 'outro_voice' : (copy.commentary_mode ?? 'outro_voice');
+    const vo = commentaryMode === 'outro_voice' ? await synthesiseCommentary(cfg, copy.commentary, path.join(dir, 'vo.mp3')) : null;
 
     // clip-specific edit plan: detected peak moment -> freeze / punch-in / replay / sticker
     const template = loadTemplate(cfg);
     const analysis = await analyzeClip(src);
     const flags = (JSON.parse(c.safety_flags ?? '[]') as string[]);
     const muteSource = flags.includes('copyrighted_music');
+    const outroSec = commentaryMode === 'none' ? 0 : template.commentary.outroSeconds;
     const timeline = planEdit({
-      sourceDuration: Math.min(probe.duration, template.limits.maxDurationSec - template.commentary.outroSeconds),
+      sourceDuration: Math.min(probe.duration, template.limits.maxDurationSec - outroSec),
       peak: analysis.peak?.t ?? null,
-      maxTotal: template.limits.maxDurationSec - template.commentary.outroSeconds,
+      maxTotal: template.limits.maxDurationSec - outroSec,
       style: copy.edit_style ?? 'full',
       stickerText: copy.sticker ?? null,
       freezeText: copy.freeze_text ?? null,
@@ -77,7 +79,7 @@ export async function produceCandidate(cfg: Config, store: Store, c: Candidate):
     // render
     const outPath = path.join(dir, `${c.id}.final.mp4`);
     const r = await withRetry(`render ${c.id}`, () => renderShort(cfg, template, {
-      clipPath: src, headline: copy.headline, commentary: copy.commentary, voPath: vo, words: transcript?.words ?? null,
+      clipPath: src, headline: copy.headline, commentary: copy.commentary, commentaryMode, voPath: vo, words: transcript?.words ?? null,
       musicPath: pickMusic(cfg, c.category), outPath, workDir: dir, timeline,
     }), { attempts: 2, baseMs: 1000 });
 
@@ -86,14 +88,14 @@ export async function produceCandidate(cfg: Config, store: Store, c: Candidate):
     const up = await withRetry(`upload ${c.id}`, () => uploadPublic(cfg, outPath, key, 'video/mp4'), { attempts: 3, baseMs: 2000 });
     const thumb = await withRetry(`upload thumb ${c.id}`, () => uploadPublic(cfg, r.thumbnailPath, key.replace(/\.mp4$/, '.jpg'), 'image/jpeg'), { attempts: 3, baseMs: 2000 });
 
-    const attribution = attributionText(c);
+    const attribution = creditText(c, { contactEmail: cfg.contactEmail });
     const prod: Production = {
       id: ulid(), candidate_id: c.id, headline: copy.headline, commentary: copy.commentary,
-      caption_text: [copy.caption, attribution].filter(Boolean).join('\n\n'),
-      hashtags: JSON.stringify(copy.hashtags), voice_id: cfg.elevenVoiceId ?? null,
+      caption_text: copy.caption,
+      hashtags: JSON.stringify(copy.hashtags), voice_id: vo ? cfg.elevenVoiceId ?? 'auto' : null,
       music_track: null, r2_key: up.uploaded ? key : null, public_url: up.uploaded ? up.url : null,
       thumbnail_url: thumb.uploaded ? thumb.url : null, duration_sec: r.durationSec,
-      render_log: JSON.stringify({ transcriptWords: transcript?.words.length ?? 0, vo: !!vo, peak: analysis.peak, dropped: timeline.dropped, cmd: r.command.slice(0, 12) }),
+      render_log: JSON.stringify({ transcriptWords: transcript?.words.length ?? 0, vo: !!vo, commentaryMode, peak: analysis.peak, dropped: timeline.dropped, cmd: r.command.slice(0, 12) }),
       reuse_basis: basis,
       edit_plan: JSON.stringify(timeline.beats),
       created_at: now(), updated_at: now(),

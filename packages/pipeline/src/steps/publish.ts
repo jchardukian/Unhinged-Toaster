@@ -1,4 +1,4 @@
-import { BufferApiError, BufferClient, buildWeekPlan, reviewBlock, toBufferDueAt, ulid, type BufferService, type Candidate, type Production, type ScheduledPost, type SlotPlan } from '@toaster/shared';
+import { BufferApiError, BufferClient, buildWeekPlan, creditText, hasReviewBlock, toBufferDueAt, ulid, type BufferService, type Candidate, type Production, type ScheduledPost, type SlotPlan } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { isTransient, withRetry } from '../retry.js';
 import type { Store } from '../store.js';
@@ -15,21 +15,25 @@ export function channelFor(cfg: Config, service: BufferService): string {
   return service === 'youtube' ? cfg.bufferYoutubeChannelId : cfg.bufferTiktokChannelId;
 }
 
-export function postText(p: Production, service: BufferService, discloseAi: boolean): string {
+/**
+ * PUBLIC caption/description: caption, creator credit + source + edit summary + contact e-mail, hashtags, AI-voice
+ * disclosure when a synthetic voice was used. Internal review information is never part of it (guarded).
+ */
+export function postText(p: Production, c: Candidate | null, service: BufferService, opts: { contactEmail?: string } = {}): string {
   const tags = (JSON.parse(p.hashtags) as string[]).map((t) => `#${t}`).join(' ');
-  const parts = [p.caption_text, tags];
-  if (discloseAi) parts.push('Commentary voice is AI-generated.');
-  const text = parts.filter(Boolean).join('\n\n');
-  return text.slice(0, service === 'tiktok' ? 2100 : 4900);
+  const credit = c ? creditText(c, { contactEmail: opts.contactEmail }) : (p.caption_text.includes('🎬') ? '' : `📩 Copyright inquiries, credit corrections or removal requests: ${opts.contactEmail ?? 'theunhingedtoaster@gmail.com'}`);
+  const usedVoice = !!p.voice_id || /"vo":true/.test(p.render_log ?? '');
+  const parts = [p.caption_text, credit, tags, usedVoice ? 'Commentary voice is AI-generated.' : ''];
+  const text = parts.filter(Boolean).join('\n\n').slice(0, service === 'tiktok' ? 2100 : 4900);
+  if (hasReviewBlock(text) || /REVIEW BEFORE APPROVING|transformation review/i.test(text)) throw new Error('internal review text must never reach a public caption');
+  return text;
 }
 
-/** Draft text: the review note (for footage without an explicit license) + the public caption. */
-export function draftText(p: Production, c: Candidate | null, service: BufferService): { text: string; publicText: string; uncertain: boolean } {
-  const publicText = postText(p, service, true);
+/** Draft text is the public text; review status is carried by Buffer tags + the readiness report, not the caption. */
+export function draftText(p: Production, c: Candidate | null, service: BufferService, contactEmail?: string): { text: string; publicText: string; uncertain: boolean } {
+  const publicText = postText(p, c, service, { contactEmail });
   const uncertain = p.reuse_basis === 'review' || (c != null && c.rights_status !== 'cleared');
-  if (!uncertain || !c) return { text: publicText, publicText, uncertain: false };
-  const text = `${reviewBlock(c)}\n\n${publicText}`.slice(0, service === 'tiktok' ? 2150 : 4950);
-  return { text, publicText, uncertain: true };
+  return { text: publicText, publicText, uncertain };
 }
 
 export interface PublishOptions {
@@ -92,10 +96,10 @@ export async function publishWeek(cfg: Config, store: Store, opts: PublishOption
         row.production_id = prod.id;
         row.candidate_id = prod.candidate_id;
         const cand = await store.getCandidate(prod.candidate_id);
-        const dt = draftText(prod, cand, service);
+        const dt = draftText(prod, cand, service, cfg.contactEmail);
         row.reuse_uncertain = dt.uncertain;
         row.public_text = dt.publicText;
-        row.review_block_stripped = !dt.uncertain;
+        row.review_block_stripped = true; // captions never carry review text anymore
         if (!client) { log.info(`[dry-run] would create ${service} draft for ${slotAt}: "${prod.headline}" <- ${prod.public_url}`); result.created++; continue; }
         try {
           const outcome = await createDraftIdempotent(cfg, client, row, prod, dt.text, now);
@@ -122,6 +126,12 @@ export async function publishWeek(cfg: Config, store: Store, opts: PublishOption
   return result;
 }
 
+/** Internal Buffer tags (never published) so review-path drafts are visually distinct in the Buffer UI. */
+export function bufferTagsFor(cfg: Config, uncertain: boolean): string[] | undefined {
+  const id = uncertain ? cfg.bufferTagReviewId : cfg.bufferTagClearedId;
+  return id ? [id] : undefined;
+}
+
 async function createDraftIdempotent(cfg: Config, client: BufferClient, row: ScheduledPost, prod: Production, text: string, now: () => Date): Promise<{ post: { id: string; status: string }; adopted: boolean }> {
   if (!prod.public_url || !/^https?:\/\//.test(prod.public_url)) throw new Error(`production ${prod.id} has no public URL (R2 not configured?)`);
   const existing = await client.findPostAt(cfg.bufferOrgId, row.buffer_channel_id, row.slot_at).catch(() => null);
@@ -143,6 +153,7 @@ async function createDraftIdempotent(cfg: Config, client: BufferClient, row: Sch
       videoTitle: prod.headline,
       youtube: row.service === 'youtube' ? { title: prod.headline.slice(0, 100), categoryId: YOUTUBE_CATEGORY_COMEDY, privacy: 'public', madeForKids: false, notifySubscribers: true, isAiGenerated: true, license: 'youtube' } : undefined,
       tiktok: row.service === 'tiktok' ? { title: prod.headline.slice(0, 90), isAiGenerated: true } : undefined,
+      tagIds: bufferTagsFor(cfg, row.reuse_uncertain ?? false),
     });
     if (post.dueAt && Math.abs(Date.parse(post.dueAt) - Date.parse(row.slot_at)) > 60_000) {
       log.warn(`Buffer stored dueAt ${post.dueAt} for slot ${row.slot_at}; sync will re-pin on approval`);

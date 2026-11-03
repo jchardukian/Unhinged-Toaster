@@ -24,7 +24,18 @@ test('rights policy: transformation review is a separate, labelled path; never "
   assert.equal(ownerReviewedRights({ rights_status: 'cleared' }, 'x'), null);
 });
 
-test('review block is explicit and strips cleanly', () => {
+test('creditText: creator, source, edit summary, contact; basis line only for explicit bases; no fair-use claim', async () => {
+  const { creditText } = await import('../src/rights.js');
+  const r = creditText({ author: 'u/jane', source_url: 'https://reddit.com/r/x/comments/1', rights_basis: null, source_platform: 'reddit' });
+  assert.match(r, /🎬 Original clip: u\/jane — https:\/\/reddit\.com\/r\/x\/comments\/1/);
+  assert.match(r, /✂️ Edited by The Unhinged Toaster/);
+  assert.match(r, /📩 .*theunhingedtoaster@gmail\.com/);
+  assert.doesNotMatch(r, /📜|fair use|licen/i);
+  assert.match(creditText({ author: 'Studio', source_url: 'https://y', rights_basis: 'cc_by', source_platform: 'youtube' }), /📜 .*Creative Commons Attribution/);
+  assert.match(creditText({ author: null, source_url: 'https://y', rights_basis: null, source_platform: 'youtube' }, { contactEmail: 'x@y.z' }), /uncredited – contact us.*\n.*\n📩 .*x@y\.z/s);
+});
+
+test('review block (internal only) is explicit and strips cleanly', () => {
   const c = { author: 'u/someone', source_url: 'https://reddit.com/r/x/comments/abc', source_platform: 'reddit', copyright_risk: 'medium', copyright_risk_reasons: JSON.stringify(['poster may not be the filmer']), rights_notes: null } as Candidate;
   const block = reviewBlock(c);
   assert.ok(block.startsWith(REVIEW_BLOCK_START));
@@ -100,7 +111,7 @@ class MemStore implements SyncStore {
   async logEvent(kind: string) { this.events.push(kind); }
 }
 
-test('approving a review draft records owner_reviewed and strips the note; failure to strip is reported and retried', async () => {
+test('approving a review draft records owner_reviewed; a legacy caption that still carries internal text is cleaned (safety net) and failure is reported', async () => {
   const draftText = `${REVIEW_BLOCK_START}\nstuff\n— end of review note —\n\nClean caption #funny`;
   const buffer: Record<string, BufferPost> = { b1: { id: 'b1', status: 'scheduled', text: draftText, dueAt: SLOT } };
   let editFails = true;

@@ -25,7 +25,8 @@ export async function runDemo(cfg: Config, flags: Record<string, string | boolea
   let haveSpeech = false;
   if (!offline) haveSpeech = !!(await synthesiseCommentary(cfg, 'Okay watch this, the dog is about to steal the entire pizza off the counter. Oh no. Oh no no no.', speech));
   const audioInput = haveSpeech ? ['-i', speech] : ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=9'];
-  await run('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30:duration=9', ...audioInput,
+  const size = flags.vertical ? '720x1280' : '1280x720';
+  await run('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', `testsrc2=size=${size}:rate=30:duration=9`, ...audioInput,
     '-vf', "drawtext=text='DEMO CLIP':fontsize=90:fontcolor=white:borderw=4:x=(w-text_w)/2:y=(h-text_h)/2",
     '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', clip]);
 
@@ -56,11 +57,13 @@ export async function runDemo(cfg: Config, flags: Record<string, string | boolea
     maxTotal: t.limits.maxDurationSec - t.commentary.outroSeconds, style: copy.edit_style ?? 'full', stickerText: copy.sticker ?? null, freezeText: copy.freeze_text ?? null,
     hasSpeech: false, // demo: force the full beat set even though the test clip has narration
   });
+  if (flags.commentary === 'none') { /* no outro: the planner already got maxTotal with outro included; fine for a 9 s demo */ }
   log.info(`edit plan: ${JSON.stringify(timeline.beats)} dropped=${timeline.dropped.join(',') || 'none'}`);
 
   // 4. render
   const out = path.join(dir, 'demo_final.mp4');
-  const r = await renderShort(cfg, t, { clipPath: clip, headline: copy.headline, commentary: copy.commentary, voPath: vo, words: transcript?.words ?? null, musicPath: pickMusic(cfg, 'funny_animals'), outPath: out, workDir: dir, timeline });
+  const commentaryMode = (['outro_voice', 'text_only', 'none'].includes(String(flags.commentary)) ? String(flags.commentary) : copy.commentary_mode ?? 'outro_voice') as 'outro_voice' | 'text_only' | 'none';
+  const r = await renderShort(cfg, t, { clipPath: clip, headline: copy.headline, commentary: copy.commentary, commentaryMode, voPath: vo, words: transcript?.words ?? null, musicPath: pickMusic(cfg, 'funny_animals'), outPath: out, workDir: dir, timeline });
   log.info(`demo rendered: ${r.outPath} (${r.durationSec.toFixed(2)}s, edited clip ${r.editedClipSec}s) thumbnail ${r.thumbnailPath}`);
   fs.writeFileSync(path.join(dir, 'demo_copy.json'), JSON.stringify({ copy, transcript: transcript?.text ?? null, vo: !!vo, peak: analysis.peak, beats: timeline.beats, dropped: timeline.dropped }, null, 2));
 }

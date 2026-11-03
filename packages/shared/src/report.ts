@@ -23,9 +23,25 @@ export interface ReadinessReport {
   videos_ready_review: number;    // ...of which footage is in transformation review (owner decides per draft)
   videos_missing: number;         // target_videos - videos_ready (>= 0)
   missing_slots: { slot_at: string; service: string }[];
+  /** Drafts whose footage has NO explicit reuse basis: the owner's copyright judgement is needed per draft. */
+  review_items: ReviewItem[];
+  /** Drafts with an explicit basis, for completeness. */
+  cleared_items: { headline: string; basis: string; source_url: string }[];
   shortage_reasons: Record<string, number>;
   blockers: string[];
   complete: boolean;
+}
+
+export interface ReviewItem {
+  headline: string;
+  production_id: string;
+  services: { service: string; buffer_post_id: string | null; state: string; slot_at: string }[];
+  source_platform: string;
+  source_url: string;
+  author: string | null;
+  copyright_risk: string | null;
+  copyright_risk_reasons: string[];
+  rights_status: string;
 }
 
 export function buildReadinessReport(input: {
@@ -44,6 +60,24 @@ export function buildReadinessReport(input: {
   const videosReady = readyProdIds.size;
   const reviewProdIds = new Set(live.filter((p) => p.reuse_uncertain).map((p) => p.production_id));
   const targetVideos = plan.slots.length / 2;
+  const candById = new Map(candidates.map((c) => [c.id, c]));
+  const prodById = new Map(productions.map((p) => [p.id, p]));
+  const review_items: ReviewItem[] = [...reviewProdIds].map((pid) => {
+    const prod = prodById.get(pid);
+    const c = prod ? candById.get(prod.candidate_id) : undefined;
+    let reasons: string[] = [];
+    try { reasons = JSON.parse(c?.copyright_risk_reasons ?? '[]'); } catch { /* ignore */ }
+    return {
+      headline: prod?.headline ?? pid, production_id: pid,
+      services: live.filter((p) => p.production_id === pid).map((p) => ({ service: p.service, buffer_post_id: p.buffer_post_id, state: p.state, slot_at: p.slot_at })),
+      source_platform: c?.source_platform ?? 'unknown', source_url: c?.source_url ?? '', author: c?.author ?? null,
+      copyright_risk: c?.copyright_risk ?? null, copyright_risk_reasons: reasons, rights_status: c?.rights_status ?? 'unknown',
+    };
+  }).sort((a, b) => a.services[0]?.slot_at.localeCompare(b.services[0]?.slot_at ?? '') ?? 0);
+  const cleared_items = [...readyProdIds].filter((pid) => !reviewProdIds.has(pid)).map((pid) => {
+    const prod = prodById.get(pid); const c = prod ? candById.get(prod.candidate_id) : undefined;
+    return { headline: prod?.headline ?? pid, basis: c?.rights_basis ?? 'unknown', source_url: c?.source_url ?? '' };
+  });
 
   const scoredPass = candidates.filter((c) => !['discovered', 'rejected_score', 'rejected_safety', 'rejected_duplicate'].includes(c.status)).length;
   const cleared = candidates.filter((c) => c.rights_status === 'cleared').length;
@@ -104,6 +138,8 @@ export function buildReadinessReport(input: {
     videos_ready_review: reviewProdIds.size,
     videos_missing: videosMissing,
     missing_slots,
+    review_items,
+    cleared_items,
     shortage_reasons: reasons,
     blockers,
     complete: videosMissing === 0 && missing_slots.length === 0,
@@ -139,8 +175,17 @@ export function formatReadinessMarkdown(r: ReadinessReport): string {
     lines.push('', '**Blockers**');
     for (const b of r.blockers) lines.push(`- ${b}`);
   }
-  if (r.videos_ready_review > 0) {
-    lines.push('', `⚠️ ${r.videos_ready_review} draft video(s) use footage WITHOUT an explicit reuse license. Each carries a review note in Buffer; approving is your decision and records it. Transformation is not a license.`);
+  if (r.review_items.length > 0) {
+    lines.push('', `### ⚠️ Transformation-review drafts (${r.review_items.length}) – your copyright judgement is needed before approving`,
+      'These videos use footage with NO reuse license on file. They are transformed (edits, captions, commentary) and credited, but transformation is not a license and nothing here claims fair use. Approving in Buffer records your decision; deleting rejects. This note is internal and never appears in a public caption.', '',
+      '| Slot (UTC) | Headline | Source | Creator | Copyright risk | Buffer post ids |', '|---|---|---|---|---|---|');
+    for (const it of r.review_items) {
+      lines.push(`| ${it.services[0]?.slot_at ?? ''} | ${it.headline} | ${it.source_platform} ${it.source_url} | ${it.author ?? '–'} | ${it.copyright_risk ?? 'unknown'}${it.copyright_risk_reasons.length ? ` (${it.copyright_risk_reasons.slice(0, 2).join('; ')})` : ''} | ${it.services.map((s) => `${s.service}:${s.buffer_post_id ?? '-'}`).join(' ')} |`);
+    }
+  }
+  if (r.cleared_items.length > 0) {
+    lines.push('', `### ✅ Drafts with an explicit reuse basis (${r.cleared_items.length})`);
+    for (const it of r.cleared_items.slice(0, 30)) lines.push(`- ${it.headline} — ${it.basis} — ${it.source_url}`);
   }
   if (r.missing_slots.length) {
     lines.push('', `**Unfilled slots** (first ${Math.min(10, r.missing_slots.length)})`);

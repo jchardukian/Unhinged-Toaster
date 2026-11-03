@@ -10,7 +10,19 @@ import { log, type Config } from '../config.js';
  */
 export async function uploadPublic(cfg: Config, file: string, key: string, contentType: string): Promise<{ key: string; url: string; uploaded: boolean }> {
   const { accountId, accessKeyId, secretAccessKey, bucket, publicBaseUrl } = cfg.r2;
-  if (!accountId || !accessKeyId || !secretAccessKey || !publicBaseUrl) {
+  const haveS3 = !!(accountId && accessKeyId && secretAccessKey && publicBaseUrl);
+  if (!haveS3 && cfg.apiUrl && cfg.apiToken) {
+    // Worker-mediated upload: the Worker writes to its R2 binding and serves /media/<key> publicly. One deploy, no S3 keys.
+    const res = await fetch(`${cfg.apiUrl.replace(/\/$/, '')}/upload/${key.split('/').map(encodeURIComponent).join('/')}`, {
+      method: 'PUT', headers: { authorization: `Bearer ${cfg.apiToken}`, 'content-type': contentType }, body: fs.readFileSync(file),
+    });
+    if (!res.ok) throw new Error(`worker upload ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const j = (await res.json()) as { key: string; url: string };
+    const url = publicBaseUrl ? `${publicBaseUrl.replace(/\/$/, '')}/${key}` : j.url;
+    log.info(`uploaded via worker ${key} -> ${url}`);
+    return { key, url, uploaded: true };
+  }
+  if (!haveS3) {
     const outDir = path.join(cfg.workDir, 'out');
     fs.mkdirSync(outDir, { recursive: true });
     const dest = path.join(outDir, key.replace(/\//g, '_'));

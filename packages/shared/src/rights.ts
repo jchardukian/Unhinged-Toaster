@@ -50,7 +50,40 @@ export function ownerReviewedRights(c: Pick<Candidate, 'rights_status'>, evidenc
   return { rights_status: 'owner_reviewed', rights_basis: 'owner_transformative_use', rights_evidence: evidence };
 }
 
-/** Text block prepended to a Buffer DRAFT whose footage has no explicit license. Stripped by the pipeline on approval. */
+export const DEFAULT_CONTACT_EMAIL = 'theunhingedtoaster@gmail.com';
+
+/**
+ * PUBLIC credit block appended to every description. Creator name/handle when identifiable, source URL, what we
+ * changed, and the contact address. It deliberately makes no claim of authorisation or fair use.
+ */
+export function creditText(c: Pick<Candidate, 'author' | 'source_url' | 'rights_basis' | 'source_platform'>, opts: { contactEmail?: string; editsSummary?: string } = {}): string {
+  const email = opts.contactEmail ?? DEFAULT_CONTACT_EMAIL;
+  const who = c.author ? displayHandle(c.author, c.source_platform) : 'original creator (uncredited – contact us to be credited)';
+  const lines = [
+    `🎬 Original clip: ${who} — ${c.source_url}`,
+    `✂️ Edited by The Unhinged Toaster: ${opts.editsSummary ?? 'original comedic commentary, cuts, zooms, freeze-frames, captions and animated visuals'}.`,
+  ];
+  switch (c.rights_basis) {
+    case 'cc_by': lines.push('📜 Original footage used under Creative Commons Attribution (CC BY).'); break;
+    case 'cc0': case 'public_domain': lines.push('📜 Original footage is public domain.'); break;
+    case 'pexels_license': lines.push('📜 Original footage via Pexels (Pexels License).'); break;
+    case 'pixabay_license': lines.push('📜 Original footage via Pixabay (Content License).'); break;
+    case 'written_permission': lines.push('📜 Original footage used with the creator\'s permission.'); break;
+    case 'licensed': lines.push('📜 Original footage licensed.'); break;
+    default: break; // no basis claim of any kind for review-path footage
+  }
+  lines.push(`📩 Copyright inquiries, credit corrections or removal requests: ${email}`);
+  return lines.join('\n');
+}
+
+function displayHandle(author: string, platform: SourcePlatform): string {
+  const a = author.trim().replace(/^@/, '');
+  if (platform === 'reddit') return `u/${a.replace(/^u\//, '')}`;
+  if (platform === 'youtube') return a; // channel title
+  return `@${a}`;
+}
+
+/** INTERNAL review summary (readiness report / approval metadata). Never placed in a public caption. */
 export const REVIEW_BLOCK_START = '⚠️ REVIEW BEFORE APPROVING';
 export const REVIEW_BLOCK_END = '— end of review note —';
 export function reviewBlock(c: Pick<Candidate, 'author' | 'source_url' | 'source_platform' | 'copyright_risk' | 'copyright_risk_reasons' | 'rights_notes'>): string {

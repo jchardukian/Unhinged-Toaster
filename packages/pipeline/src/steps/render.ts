@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { escapeDrawtext, planEdit, wrapText, type EditTimeline } from '@toaster/shared';
+import { escapeDrawtext, planEdit, wrapText, type CommentaryMode, type EditTimeline } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { assColor, buildAss, type Word } from './captions.js';
 import { ffprobe, run } from './media.js';
@@ -11,10 +11,10 @@ export interface Template {
   font: string;
   assets: Record<string, string>;
   handle: string;
-  headline: { x: number; y: number; boxWidth: number; maxCharsPerLine: number; maxLines: number; fontSizes: number[]; fill: string; outline: string; outlineWidth: number };
-  clip: { maxWidth: number; top: number; maxHeight: number; frameWidth: number; shadowOffset: number };
-  captions: { fontSize: number; bottomPadding: number; activeColor: string; idleColor: string; outlineColor: string };
-  mascot: { width: number; right: number; bottom: number; bobAmplitude: number; bobSpeed: number };
+  headline: { x: number; y: number; boxWidth: number; coverBoxWidth?: number; coverY?: number; maxCharsPerLine: number; maxLines: number; fontSizes: number[]; fill: string; outline: string; outlineWidth: number };
+  clip: { maxWidth: number; maxHeight: number; coverIfTallerThan?: number; landscapeCenterY?: number; minTop?: number; frameWidth: number; shadowOffset: number };
+  captions: { fontSize: number; bottomPadding: number; coverMarginV?: number; activeColor: string; idleColor: string; outlineColor: string };
+  mascot: { width: number; coverWidth?: number; right: number; bottom: number; bobAmplitude: number; bobSpeed: number };
   watermark: { logoWidth: number; x: number; y: number; fontSize: number };
   commentary: { position: 'outro' | 'intro'; outroSeconds: number; fontSize: number; boxColor: string; textColor: string; y: number; maxCharsPerLine: number; maxLines?: number };
   audio: { musicVolume: number; voVolume: number; loudnorm: string };
@@ -25,6 +25,7 @@ export interface RenderJob {
   clipPath: string;
   headline: string;
   commentary: string;
+  commentaryMode?: CommentaryMode; // default outro_voice; 'none' = no outro at all (the clip's own sound carries the ending)
   voPath: string | null;          // mp3 of the commentary (optional)
   words: Word[] | null;           // transcript words for captions (optional, source time)
   musicPath: string | null;
@@ -74,7 +75,9 @@ export function pickMusic(cfg: Config, category: string | null): string | null {
 export async function renderShort(cfg: Config, t: Template, job: RenderJob): Promise<RenderResult> {
   const probe = await ffprobe(job.clipPath);
   const W = t.canvas.width, H = t.canvas.height, fps = t.canvas.fps;
-  const outro = t.commentary.position === 'outro' ? t.commentary.outroSeconds : 0;
+  const mode: CommentaryMode = job.commentaryMode ?? 'outro_voice';
+  const outro = mode !== 'none' && t.commentary.position === 'outro' ? t.commentary.outroSeconds : 0;
+  const useVo = mode === 'outro_voice' && !!job.voPath;
   const maxClip = t.limits.maxDurationSec - outro;
   const srcDur = Math.min(probe.duration, maxClip);
   const tl: EditTimeline = job.timeline ?? planEdit({ sourceDuration: srcDur, peak: null, maxTotal: maxClip, style: 'light' });
@@ -83,13 +86,27 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const editedDur = tl.editedDuration;
   const total = editedDur + outro;
 
-  // fit clip into the frame
-  const scale = Math.min(t.clip.maxWidth / probe.width, t.clip.maxHeight / probe.height);
-  const cw = even(Math.floor(probe.width * scale));
-  const ch = even(Math.floor(probe.height * scale));
-  const cx = Math.round((W - cw) / 2);
-  const cy = t.clip.top + Math.round((t.clip.maxHeight - ch) / 2);
-  const fw = t.clip.frameWidth, so = t.clip.shadowOffset;
+  // Layout: the footage owns the screen. Near-vertical sources fill the whole canvas (cover, branding overlaps);
+  // landscape/square sources run full-width and sit in the upper-middle with the headline above and captions below.
+  const containScale = Math.min(W / probe.width, H / probe.height);
+  const cover = probe.height * containScale >= (t.clip.coverIfTallerThan ?? 1440);
+  let cw: number, ch: number, cx: number, cy: number, preScale = '';
+  if (cover) {
+    const sc = Math.max(W / probe.width, H / probe.height);
+    const sw = even(Math.ceil(probe.width * sc)), sh = even(Math.ceil(probe.height * sc));
+    cw = W; ch = H; cx = 0; cy = 0;
+    preScale = `scale=${sw}:${sh}:flags=lanczos,crop=${W}:${H}`;
+  } else {
+    const sc = Math.min(t.clip.maxWidth / probe.width, t.clip.maxHeight / probe.height);
+    cw = even(Math.floor(probe.width * sc));
+    ch = even(Math.floor(probe.height * sc));
+    cx = Math.round((W - cw) / 2);
+    const minTop = t.clip.minTop ?? 440;
+    const centerY = t.clip.landscapeCenterY ?? 900;
+    cy = Math.max(minTop, Math.min(H - ch - 380, Math.round(centerY - ch / 2)));
+    preScale = `scale=${cw}:${ch}:flags=lanczos`;
+  }
+  const fw = cover ? 0 : t.clip.frameWidth, so = t.clip.shadowOffset;
 
   const font = fontPath(cfg, t);
   const fontsDir = path.dirname(font);
@@ -111,7 +128,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const iLogo = add('-loop', '1', '-i', logo);
   const shoutPath = path.join(cfg.assetsDir, 'brand', 'mascot_shout.png');
   const iShout = fs.existsSync(shoutPath) ? add('-loop', '1', '-i', shoutPath) : -1;
-  const iVo = job.voPath ? add('-i', job.voPath) : -1;
+  const iVo = useVo ? add('-i', job.voPath!) : -1;
   const iMusic = job.musicPath ? add('-stream_loop', '-1', '-i', job.musicPath) : -1;
 
   // ---------- captions file (source time -> edited time; drop words inside the replay since it is a repeat)
@@ -121,7 +138,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     assFile = path.join(job.workDir, 'captions.ass');
     fs.writeFileSync(assFile, buildAss(words, {
       fontName: fontFamilyName(font), fontSize: t.captions.fontSize, playResX: W, playResY: H,
-      marginV: H - (cy + ch) + t.captions.bottomPadding,
+      marginV: cover ? (t.captions.coverMarginV ?? 470) : H - (cy + ch) + t.captions.bottomPadding,
       primary: assColor(t.captions.activeColor), secondary: assColor(t.captions.idleColor), outline: assColor(t.captions.outlineColor),
     }));
   }
@@ -130,10 +147,11 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const f: string[] = [];
   if (useBgLoop) f.push(`[${iBg}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${fps},format=rgba[bg0]`);
   else f.push(`[${iBg}:v]rotate=t*0.10:ow=${W}:oh=${H}:c=black,scale=w=${W}*(1.02+0.02*sin(t*1.3)):h=${H}*(1.02+0.02*sin(t*1.3)):eval=frame,crop=${W}:${H},fps=${fps},format=rgba[bg0]`);
-  f.push(`[bg0]drawbox=x=${cx - fw + so}:y=${cy - fw + so}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.black}@0.85:t=fill[bg1]`);
+  if (cover) f.push('[bg0]null[bg1]');
+  else f.push(`[bg0]drawbox=x=${cx - fw + so}:y=${cy - fw + so}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.black}@0.85:t=fill[bg1]`);
 
   // --- edited clip chain
-  f.push(`[${iClip}:v]scale=${cw}:${ch}:flags=lanczos,setsar=1,fps=${fps},trim=0:${D.toFixed(3)},setpts=PTS-STARTPTS[c0]`);
+  f.push(`[${iClip}:v]${preScale},setsar=1,fps=${fps},trim=0:${D.toFixed(3)},setpts=PTS-STARTPTS[c0]`);
   const splits = ['cB'];
   if (b.freeze) splits.unshift('cA');
   if (b.replay) splits.push('cR');
@@ -163,16 +181,21 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   f.push(`[${mainLabel}]setpts=PTS-STARTPTS${padClip}[clip]`);
 
   f.push(`[bg1][clip]overlay=x=${cx}:y=${cy}:shortest=0[v1]`);
-  f.push(`[v1]drawbox=x=${cx - fw}:y=${cy - fw}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.yellow}:t=${fw}[v2]`);
+  if (cover) f.push('[v1]null[v2]');
+  else f.push(`[v1]drawbox=x=${cx - fw}:y=${cy - fw}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.yellow}:t=${fw}[v2]`);
 
-  // headline box + text
+  // headline box + text (smaller and higher in cover mode so it overlaps as little footage as possible)
   const lines = wrapText(job.headline, t.headline.maxCharsPerLine, t.headline.maxLines);
-  const fsz = t.headline.fontSizes[Math.min(lines.length, t.headline.fontSizes.length) - 1];
-  f.push(`[${iBox}:v]scale=${t.headline.boxWidth}:-1[hbox]`);
-  f.push(`[v2][hbox]overlay=x=${t.headline.x}:y=${t.headline.y}[v3]`);
-  const boxH = Math.round(t.headline.boxWidth * 0.34);
+  const hboxW = cover ? (t.headline.coverBoxWidth ?? 900) : t.headline.boxWidth;
+  const hboxX = Math.round((W - hboxW) / 2);
+  const hboxY = cover ? (t.headline.coverY ?? 40) : t.headline.y;
+  const hScale = hboxW / t.headline.boxWidth;
+  const fsz = Math.round(t.headline.fontSizes[Math.min(lines.length, t.headline.fontSizes.length) - 1] * hScale);
+  f.push(`[${iBox}:v]scale=${hboxW}:-1[hbox]`);
+  f.push(`[v2][hbox]overlay=x=${hboxX}:y=${hboxY}[v3]`);
+  const boxH = Math.round(hboxW * 0.34);
   const lineH = Math.round(fsz * 1.02);
-  const textTop = t.headline.y + Math.round((boxH - lines.length * lineH) / 2);
+  const textTop = hboxY + Math.round((boxH - lines.length * lineH) / 2);
   let cur = 'v3';
   lines.forEach((line, i) => {
     const nxt = `h${i}`;
@@ -194,8 +217,8 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     cur = 'stk';
   }
 
-  // commentary text (shown while VO plays)
-  const cLines = wrapText(job.commentary, t.commentary.maxCharsPerLine, t.commentary.maxLines ?? 3);
+  // commentary text (outro_voice / text_only); with mode 'none' the clip's own sound carries the ending
+  const cLines = mode === 'none' ? [] : wrapText(job.commentary, t.commentary.maxCharsPerLine, t.commentary.maxLines ?? 3);
   const enable = outro > 0 ? `gte(t,${editedDur.toFixed(2)})` : `lt(t,${Math.min(editedDur, 3.5).toFixed(2)})`;
   cLines.forEach((line, i) => {
     const nxt = `c${i}`;
@@ -209,11 +232,12 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   f.push(`[wm0]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(t.handle)}':fontsize=${t.watermark.fontSize}:fontcolor=${t.colors.white}:borderw=4:bordercolor=${t.colors.black}:x=${t.watermark.x + t.watermark.logoWidth + 14}:y=${t.watermark.y + Math.round(t.watermark.logoWidth / 2 - t.watermark.fontSize / 2)}[wm]`);
 
   // mascot (bobbing); optional "shout" pose while the commentary plays and at the sticker moment
-  f.push(`[${iMascot}:v]scale=${t.mascot.width}:-1[masc]`);
+  const mascotW = cover ? (t.mascot.coverWidth ?? 250) : t.mascot.width;
+  f.push(`[${iMascot}:v]scale=${mascotW}:-1[masc]`);
   if (iShout >= 0) {
     const stickerWin = b.sticker ? `+between(t,${tl.map(b.sticker.at).toFixed(3)},${(tl.map(b.sticker.at) + b.sticker.duration).toFixed(3)})` : '';
-    const shoutEnable = `(${outro > 0 ? `gte(t,${editedDur.toFixed(2)})` : `lt(t,${Math.min(editedDur, 3.5).toFixed(2)})`}${stickerWin})`;
-    f.push(`[${iShout}:v]scale=${t.mascot.width}:-1[shout]`);
+    const shoutEnable = `(${mode === 'none' ? '0' : outro > 0 ? `gte(t,${editedDur.toFixed(2)})` : `lt(t,${Math.min(editedDur, 3.5).toFixed(2)})`}${stickerWin})`;
+    f.push(`[${iShout}:v]scale=${mascotW}:-1[shout]`);
     f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame:enable='not(${shoutEnable})'[m1]`);
     f.push(`[m1][shout]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude * 1.6}*sin(t*${t.mascot.bobSpeed * 2.5}):eval=frame:enable='${shoutEnable}':format=auto,format=yuv420p[vout]`);
   } else {
@@ -274,7 +298,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     '-movflags', '+faststart',
     job.outPath,
   ];
-  log.info(`ffmpeg render -> ${path.basename(job.outPath)} (${total.toFixed(1)}s = clip ${D.toFixed(1)}s + freeze ${tl.freezeDuration}s + replay ${tl.replayDuration}s + outro ${outro}s; clip ${cw}x${ch} at ${cx},${cy})`);
+  log.info(`ffmpeg render -> ${path.basename(job.outPath)} (${total.toFixed(1)}s = clip ${D.toFixed(1)}s + freeze ${tl.freezeDuration}s + replay ${tl.replayDuration}s + outro ${outro}s [${mode}]; ${cover ? 'full-bleed' : 'full-width'} ${cw}x${ch} at ${cx},${cy})`);
   await run('ffmpeg', args);
 
   const thumbnailPath = job.outPath.replace(/\.mp4$/, '.jpg');

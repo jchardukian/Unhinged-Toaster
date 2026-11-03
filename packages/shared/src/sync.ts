@@ -129,8 +129,9 @@ export async function runSync(client: BufferClientLike, store: SyncStore, opts: 
         result.errors.push({ post_id: p.buffer_post_id!, error: err });
       }
     }
-    // Transformation-review drafts: once approved, record the owner's decision and remove the review note from the
-    // public caption. Retried on every poll until it succeeds (the post stays scheduled, so there is time).
+    // Transformation-review drafts: once approved, record the owner's decision (approval metadata). Review information
+    // lives in the readiness report and Buffer tags, never in captions; the strip below is a safety net for any
+    // caption that still carries internal review text (legacy drafts) and is retried every poll until clean.
     const approvedNow = r.approved || (p.state === 'scheduled' && p.reuse_uncertain && !p.review_block_stripped);
     if (approvedNow && p.reuse_uncertain) {
       if (r.approved) {
