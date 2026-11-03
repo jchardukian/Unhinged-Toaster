@@ -17,7 +17,7 @@ export interface Template {
   mascot: { width: number; coverWidth?: number; right: number; bottom: number; bobAmplitude: number; bobSpeed: number };
   watermark: { logoWidth: number; x: number; y: number; fontSize: number; wordmarkWidth?: number; wordmarkBottom?: number };
   commentary: { position: 'outro' | 'intro'; introDelay?: number; duckVolume?: number; outroSeconds: number; fontSize: number; boxColor: string; textColor: string; y: number; maxCharsPerLine: number; maxLines?: number };
-  audio: { musicVolume: number; voVolume: number; loudnorm: string };
+  audio: { musicVolume: number; musicDuck?: number; voVolume: number; loudnorm: string };
   limits: { maxDurationSec: number };
 }
 
@@ -311,7 +311,10 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     mixIn.push('[vo]');
   }
   if (iMusic >= 0) {
-    aParts.push(`[${iMusic}:a]aresample=48000,volume=${t.audio.musicVolume},atrim=0:${total.toFixed(2)}[mus]`);
+    // light bed: fade in/out, ducked further while the toaster speaks
+    const voWin = useVo ? (intro ? `between(t,${introStart.toFixed(2)},${introEnd.toFixed(2)})` : `gte(t,${editedDur.toFixed(2)})`) : null;
+    const musicDuck = voWin ? `,volume=${(t.audio.musicDuck ?? 0.35).toFixed(2)}:enable='${voWin}'` : '';
+    aParts.push(`[${iMusic}:a]aresample=48000,atrim=0:${total.toFixed(2)},afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, total - 1.2).toFixed(2)}:d=1.2,volume=${t.audio.musicVolume}${musicDuck}[mus]`);
     mixIn.push('[mus]');
   }
   aParts.push(`${mixIn.join('')}amix=inputs=${mixIn.length}:duration=longest:normalize=0,loudnorm=${t.audio.loudnorm},alimiter=limit=0.95[aout]`);

@@ -93,7 +93,7 @@ export async function produceCandidate(cfg: Config, store: Store, c: Candidate, 
     const outPath = path.join(dir, `${c.id}.final.mp4`);
     const r = await withRetry(`render ${c.id}`, () => renderShort(cfg, template, {
       clipPath: src, headline: copy.headline, commentary: copy.commentary, commentaryMode, voPath: vo, words: transcript?.words ?? null,
-      musicPath: pickMusic(cfg, c.category), outPath, workDir: dir, timeline,
+      musicPath: cfg.musicDefault === 'never' ? null : (copy.music === 'none' && cfg.musicDefault !== 'always') ? null : pickMusic(cfg, c.category), outPath, workDir: dir, timeline,
     }), { attempts: 2, baseMs: 1000 });
 
     // upload

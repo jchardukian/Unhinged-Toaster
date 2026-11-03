@@ -13,7 +13,8 @@ Output JSON:
  "sticker": string,      // 1-3 word comic reaction that pops on screen at the peak moment, e.g. "NOPE.", "WHY.", "OH NO.", "BONK."
  "freeze_text": string,  // 1-4 words shown on a freeze-frame just before the payoff, e.g. "WAIT FOR IT…", "HE HAS NO IDEA"
  "edit_style": "full" | "light",  // light when the clip is dialogue-driven or the joke needs continuous motion (no freeze, no replay)
- "commentary_mode": "outro_voice" | "text_only" | "none"  // none when the clip's own sound IS the joke (screams, crashes, laughter, dialogue payoff); text_only when a silent on-screen line is funnier than a voice; otherwise outro_voice
+ "commentary_mode": "outro_voice" | "text_only" | "none",  // none when the clip's own sound IS the joke (screams, crashes, laughter, dialogue payoff); text_only when a silent on-screen line is funnier than a voice; otherwise outro_voice
+ "music": "light" | "none"       // light = quiet comedic bed under the clip; none when the clip's own audio (a scream, a crash, dialogue) must stay clean
 }`;
 
 export async function writeCopy(cfg: Config, c: Candidate, transcript?: string | null): Promise<CopyResult> {
@@ -53,6 +54,7 @@ export function validate(r: CopyResult): CopyResult | null {
     freeze_text: freeze || undefined,
     edit_style: r.edit_style === 'light' ? 'light' : 'full',
     commentary_mode: r.commentary_mode === 'none' || r.commentary_mode === 'text_only' ? r.commentary_mode : 'outro_voice',
+    music: r.music === 'none' ? 'none' : 'light',
   };
 }
 
@@ -71,5 +73,5 @@ export function fallback(c: Candidate): CopyResult {
     wholesome_reactions: { h: 'Protect this reaction at all costs', c: 'I am a furious kitchen appliance and even I teared up.' },
   };
   const f = byCat[c.category ?? 'people_fails'] ?? byCat.people_fails;
-  return { headline: f.h, commentary: f.c, caption: 'The Unhinged Toaster reacts.', hashtags: ['funny', 'shorts', 'fails', 'viral', 'comedy'], sticker: 'OH NO.', freeze_text: 'WAIT FOR IT…', edit_style: 'full', commentary_mode: 'outro_voice' };
+  return { headline: f.h, commentary: f.c, caption: 'The Unhinged Toaster reacts.', hashtags: ['funny', 'shorts', 'fails', 'viral', 'comedy'], sticker: 'OH NO.', freeze_text: 'WAIT FOR IT…', edit_style: 'full', commentary_mode: 'outro_voice', music: 'light' };
 }
