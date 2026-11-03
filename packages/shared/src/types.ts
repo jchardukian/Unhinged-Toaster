@@ -1,0 +1,184 @@
+/**
+ * Shared domain types for The Unhinged Toaster pipeline.
+ * These mirror the D1 schema in packages/worker/migrations.
+ */
+
+export type ContentCategory =
+  | 'people_fails'
+  | 'funny_animals'
+  | 'unbelievable'
+  | 'wholesome_reactions';
+
+export const CONTENT_CATEGORIES: ContentCategory[] = [
+  'people_fails',
+  'funny_animals',
+  'unbelievable',
+  'wholesome_reactions',
+];
+
+export type SourcePlatform = 'reddit' | 'youtube' | 'pexels' | 'pixabay' | 'manual' | 'licensed_library';
+
+/**
+ * Rights lifecycle. Only `cleared` may be rendered or sent to Buffer.
+ *   unknown           -> discovered, no license information
+ *   outreach_pending  -> permission request drafted / sent to the creator
+ *   cleared           -> we hold a usable basis + evidence
+ *   denied            -> creator declined or source license forbids reuse
+ *   expired           -> time-limited license lapsed
+ */
+export type RightsStatus = 'unknown' | 'outreach_pending' | 'cleared' | 'denied' | 'expired';
+
+/** Legal basis for reuse. Each requires evidence (URL / file) stored alongside it. */
+export type RightsBasis =
+  | 'cc_by'              // Creative Commons Attribution (e.g. YouTube "creativeCommon" license)
+  | 'cc0'                // public domain dedication
+  | 'public_domain'
+  | 'pexels_license'
+  | 'pixabay_license'
+  | 'written_permission' // DM / email from the creator, archived
+  | 'licensed'           // paid license (Jukin, ViralHog, Newsflare, Storyful ...)
+  | 'owned';             // produced by us
+
+export const CLEARABLE_BASES: RightsBasis[] = [
+  'cc_by', 'cc0', 'public_domain', 'pexels_license', 'pixabay_license', 'written_permission', 'licensed', 'owned',
+];
+
+export type CandidateStatus =
+  | 'discovered'
+  | 'scored'
+  | 'rejected_score'
+  | 'rejected_duplicate'
+  | 'rejected_safety'
+  | 'blocked_rights'
+  | 'ready'          // cleared + scored, waiting to be produced
+  | 'producing'
+  | 'produced'       // rendered video exists in R2
+  | 'drafted'        // Buffer drafts exist
+  | 'approved'       // user approved in Buffer (status moved to scheduled)
+  | 'published'
+  | 'rejected_user'  // user deleted / rejected the draft in Buffer
+  | 'failed';
+
+export interface Candidate {
+  id: string;                    // ulid
+  source_platform: SourcePlatform;
+  source_id: string;             // platform-native id
+  source_url: string;            // canonical URL to the original post
+  media_url: string | null;      // direct downloadable media URL (may expire)
+  author: string | null;
+  author_url: string | null;
+  title: string;
+  description: string | null;
+  category: ContentCategory | null;
+  duration_sec: number | null;
+  width: number | null;
+  height: number | null;
+  published_at: string | null;   // ISO
+  discovered_at: string;         // ISO
+  // engagement snapshot at discovery
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  engagement_velocity: number | null;  // likes per hour since publish
+  // scoring
+  heuristic_score: number | null;      // 0-100
+  llm_score: number | null;            // 0-100
+  final_score: number | null;          // 0-100 (after category weight)
+  llm_rationale: string | null;
+  safety_flags: string | null;         // JSON array of strings
+  // dedupe
+  phash: string | null;                // hex, 64-bit per sampled frame joined by ':'
+  duplicate_of: string | null;
+  // rights
+  rights_status: RightsStatus;
+  rights_basis: RightsBasis | null;
+  rights_evidence: string | null;      // URL / note / archived message id
+  rights_notes: string | null;
+  attribution_text: string | null;     // what we print in the description
+  status: CandidateStatus;
+  status_reason: string | null;
+  updated_at: string;
+}
+
+export interface Production {
+  id: string;                    // ulid
+  candidate_id: string;
+  headline: string;
+  commentary: string;
+  caption_text: string;          // post caption/description incl. attribution
+  hashtags: string;              // JSON array
+  voice_id: string | null;
+  music_track: string | null;
+  r2_key: string | null;         // rendered mp4
+  public_url: string | null;
+  thumbnail_url: string | null;
+  duration_sec: number | null;
+  render_log: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type BufferService = 'youtube' | 'tiktok';
+
+export type BufferPostState =
+  | 'draft'
+  | 'needs_approval'
+  | 'scheduled'
+  | 'sending'
+  | 'sent'
+  | 'error'
+  | 'deleted';
+
+export interface ScheduledPost {
+  id: string;                     // ulid
+  production_id: string;
+  candidate_id: string;
+  service: BufferService;
+  buffer_channel_id: string;
+  buffer_post_id: string | null;
+  slot_at: string;                // intended publish time ISO (UTC)
+  batch_week: string;             // e.g. 2026-W46
+  state: BufferPostState;
+  last_synced_at: string | null;
+  buffer_error: string | null;
+  // performance (filled by metrics sync)
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  metrics_updated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CategoryWeight {
+  category: ContentCategory;
+  weight: number;        // multiplier around 1.0, clamped [0.6, 1.6]
+  samples: number;
+  avg_views: number | null;
+  updated_at: string;
+}
+
+export interface SlotPlan {
+  week: string;
+  slots: { slot_at: string; service: BufferService }[];
+}
+
+export interface LlmScoreResult {
+  entertainment: number;     // 0-10
+  surprise: number;          // 0-10
+  clarity: number;           // 0-10 (works without context, within 3 seconds)
+  brand_fit: number;         // 0-10
+  rewatchability: number;    // 0-10
+  category: ContentCategory;
+  safety_flags: string[];    // e.g. ["minor_visible", "injury", "nsfw", "hate", "copyrighted_music", "private_person_mocking"]
+  rationale: string;
+}
+
+export interface CopyResult {
+  headline: string;      // <= 60 chars, punchy, comic-book energy
+  commentary: string;    // ONE sentence, <= 110 chars, spoken by the toaster
+  caption: string;       // post description without attribution/hashtags
+  hashtags: string[];    // 4-8 tags without '#'
+}

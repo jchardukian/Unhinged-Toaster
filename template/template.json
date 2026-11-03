@@ -1,0 +1,25 @@
+{
+  "name": "unhinged-toaster-v1",
+  "canvas": { "width": 1080, "height": 1920, "fps": 30 },
+  "colors": { "red": "#E2231A", "black": "#111111", "yellow": "#FFD400", "white": "#FFFFFF" },
+  "font": "fonts/Bangers-Regular.ttf",
+  "assets": {
+    "background_loop": "brand/background_loop.mp4",
+    "background_still": "brand/generated/burst.png",
+    "mascot": "brand/mascot.png",
+    "mascot_fallback": "brand/generated/mascot_placeholder.png",
+    "headline_box": "brand/headline_box.png",
+    "headline_box_fallback": "brand/generated/headline_box_placeholder.png",
+    "logo": "brand/logo.png",
+    "logo_fallback": "brand/generated/logo_placeholder.png"
+  },
+  "handle": "@theunhingedtoaster",
+  "headline": { "x": 40, "y": 110, "boxWidth": 1000, "maxCharsPerLine": 16, "maxLines": 3, "fontSizes": [96, 86, 72], "fill": "#FFD400", "outline": "#111111", "outlineWidth": 10 },
+  "clip": { "maxWidth": 1000, "top": 470, "maxHeight": 1040, "frameWidth": 12, "shadowOffset": 16 },
+  "captions": { "fontSize": 74, "bottomPadding": 70, "activeColor": "#FFD400", "idleColor": "#FFFFFF", "outlineColor": "#111111" },
+  "mascot": { "width": 340, "right": 24, "bottom": 10, "bobAmplitude": 10, "bobSpeed": 3 },
+  "watermark": { "logoWidth": 72, "x": 36, "y": 1812, "fontSize": 44 },
+  "commentary": { "position": "outro", "outroSeconds": 3.2, "fontSize": 50, "boxColor": "#FFD400", "textColor": "#111111", "y": 1540, "maxCharsPerLine": 26, "maxLines": 3 },
+  "audio": { "musicVolume": 0.14, "voVolume": 1.5, "loudnorm": "I=-14:TP=-1.5:LRA=11" },
+  "limits": { "maxDurationSec": 59 }
+}

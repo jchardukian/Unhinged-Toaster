@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - name: Offline template smoke render (FFmpeg only)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg python3-pil
+          npm run brand:generate
+          node packages/pipeline/dist/cli.js demo --offline
+          ffprobe -v error -show_entries stream=width,height -of csv=p=0 work/demo/demo_final.mp4 | grep -q "1080,1920"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-render
+          path: |
+            work/demo/demo_final.mp4
+            work/demo/demo_final.jpg
+          retention-days: 7

@@ -1,0 +1,57 @@
+name: Pipeline - weekly batch (21 drafts for review)
+
+on:
+  schedule:
+    - cron: '0 13 * * 0'   # Sunday 13:00 UTC (07:00 Chicago): drafts are ready for Sunday review
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why this run was triggered (e.g. replace rejected posts)'
+        default: 'manual'
+      dry_run:
+        description: 'Do not touch Buffer'
+        type: boolean
+        default: false
+
+concurrency:
+  group: toaster-pipeline
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg python3-pil && pip install -q yt-dlp
+      - run: npm ci && npm run build && npm run brand:generate
+      - name: run-weekly (${{ inputs.reason || 'scheduled' }})
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ vars.ELEVENLABS_VOICE_ID }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
+          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
+          REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL }}
+          TOASTER_API_URL: ${{ vars.TOASTER_API_URL }}
+          TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_APPROVAL_MODE: ${{ vars.BUFFER_APPROVAL_MODE }}
+          BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE }}
+          PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS }}
+        run: node packages/pipeline/dist/cli.js run-weekly ${{ inputs.dry_run && '--dry-run' || '' }}

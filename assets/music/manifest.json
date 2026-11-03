@@ -1,0 +1,12 @@
+{
+  "_comment": "Only tracks listed here are ever mixed into videos. Add royalty-free / licensed tracks you hold rights for. Example entry below is a template and is skipped because the file does not exist.",
+  "tracks": [
+    {
+      "file": "example_upbeat_comedy.mp3",
+      "title": "Example Upbeat Comedy",
+      "license": "YouTube Audio Library (free to use)",
+      "source_url": "https://studio.youtube.com/channel/UC.../music",
+      "moods": ["people_fails", "funny_animals", "unbelievable", "wholesome_reactions"]
+    }
+  ]
+}
