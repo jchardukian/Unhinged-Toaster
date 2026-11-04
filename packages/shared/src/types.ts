@@ -108,6 +108,9 @@ export interface Candidate {
   rights_notes: string | null;
   copyright_risk: CopyrightRisk | null;        // for transformation_review footage
   quality_tier?: 'hd' | 'ok' | 'low' | null;   // see quality.ts; 'ok' is last-resort only
+  detected_handle?: string | null;             // creator handle visible in the footage (watermark), e.g. "davlyat_official"
+  detected_platform?: string | null;           // "instagram" | "tiktok" | "youtube" | "snapchat" | ... when a platform watermark is visible
+  visual_summary?: string | null;              // what happens in the clip, from the vision pass
   copyright_risk_reasons: string | null;       // JSON array of strings
   attribution_text: string | null;     // what we print in the description
   status: CandidateStatus;

@@ -5,7 +5,11 @@ import { chatJson } from '../llm.js';
 const SYSTEM = `You are the content editor for "The Unhinged Toaster", a comedy Shorts channel (YouTube Shorts + TikTok).
 Brand: loud, comic-book, red/black/yellow, an angry toaster mascot that yells one-liners. Family-friendly, never cruel.
 Content pillars: funny people & unexpected fails, funny animals, unbelievable moments, wholesome & hilarious reactions.
-You rate candidate clips from their metadata (title, source community, stats, duration, optional transcript).
+You rate candidate clips from their metadata (title, source community, stats, duration, optional transcript) and, when provided,
+a contact sheet of six frames in time order (left-to-right, top-to-bottom). Describe what actually happens in visual_summary (one sentence).
+Look for on-screen watermarks or handles (Instagram/TikTok/YouTube/Snapchat logos, "@name" text, channel bugs): report
+detected_handle (without @, or null) and detected_platform (instagram|tiktok|youtube|snapchat|facebook|twitter|other|null). A watermark from
+another platform means the poster is probably not the creator: copyright_risk at least "medium" (keep "high" for professional/broadcast/compilation/music content).
 Score each dimension 0-10 as integers:
 - entertainment: how funny/delightful is this likely to be
 - surprise: unexpected twist or payoff
@@ -23,7 +27,7 @@ Also assess copyright_risk for reusing this footage in a transformed commentary 
 - "low": clearly self-filmed amateur phone footage posted by the person who filmed it, no commercial music
 copyright_risk_reasons: array of short strings.`;
 
-export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: CategoryWeight[], transcript?: string | null): Promise<Candidate> {
+export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: CategoryWeight[], transcript?: string | null, framesJpegBase64?: string): Promise<Candidate> {
   let c = cIn;
   const h = heuristicScore(c);
   let llm: LlmScoreWithRisk | null = null;
@@ -36,8 +40,11 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
       stats: { views: c.views, likes: c.likes, comments: c.comments, shares: c.shares, published_at: c.published_at },
       duration_sec: c.duration_sec,
       transcript: transcript?.slice(0, 600) ?? null,
-    }), { temperature: 0.2, maxTokens: 400 });
+      frames: framesJpegBase64 ? 'attached: 6 frames, time order left-to-right, top-to-bottom' : 'not available',
+    }), { temperature: 0.2, maxTokens: 500, imageJpegBase64: framesJpegBase64 });
     llm = sanitise(llm);
+    if (llm.visual_summary) c = { ...c, visual_summary: llm.visual_summary };
+    if (llm.detected_handle) c = { ...c, detected_handle: llm.detected_handle, detected_platform: llm.detected_platform ?? null };
     const cr = llm.copyright_risk;
     if ((cr === 'low' || cr === 'medium' || cr === 'high') && c.copyright_risk !== 'high') {
       c = { ...c, copyright_risk: cr, copyright_risk_reasons: JSON.stringify(llm.copyright_risk_reasons ?? []) };
@@ -68,7 +75,7 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
   };
 }
 
-type LlmScoreWithRisk = LlmScoreResult & { copyright_risk?: string; copyright_risk_reasons?: string[] };
+type LlmScoreWithRisk = LlmScoreResult & { copyright_risk?: string; copyright_risk_reasons?: string[]; visual_summary?: string | null; detected_handle?: string | null; detected_platform?: string | null };
 function sanitise(r: LlmScoreWithRisk): LlmScoreWithRisk {
   const n = (v: unknown) => Math.max(0, Math.min(10, Math.round(Number(v) || 0)));
   return {
@@ -76,5 +83,8 @@ function sanitise(r: LlmScoreWithRisk): LlmScoreWithRisk {
     category: r.category, safety_flags: Array.isArray(r.safety_flags) ? r.safety_flags.map(String) : [], rationale: String(r.rationale ?? '').slice(0, 300),
     copyright_risk: typeof r.copyright_risk === 'string' ? r.copyright_risk.toLowerCase() : undefined,
     copyright_risk_reasons: Array.isArray(r.copyright_risk_reasons) ? r.copyright_risk_reasons.map(String).slice(0, 6) : [],
+    visual_summary: typeof r.visual_summary === 'string' ? r.visual_summary.slice(0, 300) : null,
+    detected_handle: typeof r.detected_handle === 'string' && /^[A-Za-z0-9._]{2,40}$/.test(r.detected_handle.replace(/^@/, '')) ? r.detected_handle.replace(/^@/, '') : null,
+    detected_platform: typeof r.detected_platform === 'string' ? r.detected_platform.toLowerCase().slice(0, 20) : null,
   };
 }

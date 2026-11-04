@@ -169,3 +169,9 @@ test('quality gate: 1080p-class required, 720p-class last resort, lower rejected
   assert.equal(upscaleFactor(1080, 1920), 1);
   assert.equal(upscaleFactor(720, 1280), 1.5);
 });
+
+test('creditText credits the creator visible in the footage ahead of the reposter', async () => {
+  const { creditText } = await import('../src/rights.js');
+  const r = creditText({ author: 'reposter', source_url: 'https://reddit.com/r/x/comments/1', rights_basis: null, source_platform: 'reddit', detected_handle: 'davlyat_official', detected_platform: 'instagram' });
+  assert.match(r, /🎬 Original clip: @davlyat_official on Instagram \(as credited in the footage\) — found via u\/reposter: https:\/\/reddit\.com/);
+});

@@ -17,11 +17,11 @@ Output JSON:
  "music": "light" | "none"       // light = quiet comedic bed under the clip; none when the clip's own audio (a scream, a crash, dialogue) must stay clean
 }`;
 
-export async function writeCopy(cfg: Config, c: Candidate, transcript?: string | null): Promise<CopyResult> {
+export async function writeCopy(cfg: Config, c: Candidate, transcript?: string | null, framesJpegBase64?: string): Promise<CopyResult> {
   try {
-    const r = await chatJson<CopyResult>(cfg, SYSTEM, JSON.stringify({
-      original_title: c.title, description: c.description, category: c.category, duration_sec: c.duration_sec, transcript: transcript?.slice(0, 800) ?? null,
-    }), { temperature: 0.9, maxTokens: 350 });
+    const r = await chatJson<CopyResult>(cfg, SYSTEM + (framesJpegBase64 ? '\nA contact sheet of six frames (time order: left-to-right, top-to-bottom) is attached: write about what VISIBLY happens, especially the payoff in the later frames. Never mention watermarks or handles in the copy.' : ''), JSON.stringify({
+      original_title: c.title, description: c.description, visual_summary: c.visual_summary ?? null, category: c.category, duration_sec: c.duration_sec, transcript: transcript?.slice(0, 800) ?? null,
+    }), { temperature: 0.9, maxTokens: 400, imageJpegBase64: framesJpegBase64 });
     const out = validate(r);
     if (out) return out;
     log.warn(`copy failed validation for ${c.id}, retrying once`);

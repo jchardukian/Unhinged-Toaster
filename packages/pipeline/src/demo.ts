@@ -7,6 +7,9 @@ import { loadTemplate, pickMusic, renderShort } from './steps/render.js';
 import { synthesiseCommentary } from './steps/tts.js';
 import { writeCopy } from './steps/copy.js';
 import { analyzeClip } from './steps/analyze.js';
+import { contactSheet, sheetBase64, sheetPathFor } from './steps/frames.js';
+import { scoreCandidate } from './steps/score.js';
+import { defaultCategoryWeights } from '@toaster/shared';
 import { planEdit, qualityTier, type Candidate } from '@toaster/shared';
 
 /**
@@ -49,9 +52,19 @@ export async function runDemo(cfg: Config, flags: Record<string, string | boolea
   const audio = await extractAudio(clip, path.join(dir, 'demo_audio.mp3'));
   const transcript = audio && (haveSpeech || !!realClip) && !offline ? await transcribe(cfg, audio) : null;
   log.info(`transcript: ${transcript ? `${transcript.words.length} words: "${transcript.text}"` : 'none'}`);
+  let frames: string | undefined;
+  if (!offline) {
+    const sheet = await contactSheet(clip, sheetPathFor(dir)).catch(() => null);
+    frames = sheet ? sheetBase64(sheet) : undefined;
+    if (frames) {
+      const scored = await scoreCandidate(cfg, cand, defaultCategoryWeights(new Date().toISOString()), transcript?.text, frames);
+      log.info(`vision: score ${scored.final_score} risk ${scored.copyright_risk} handle ${scored.detected_handle ?? '-'} (${scored.detected_platform ?? '-'}) | ${scored.visual_summary ?? ''}`);
+      Object.assign(cand, { visual_summary: scored.visual_summary ?? null, detected_handle: scored.detected_handle ?? null, detected_platform: scored.detected_platform ?? null, copyright_risk: scored.copyright_risk ?? null });
+    }
+  }
   const copy = offline
     ? { headline: 'THIS DOG HAS NO CHILL', commentary: 'That pizza never stood a chance and honestly neither did the owner.', caption: 'demo', hashtags: ['funny'], sticker: 'NOPE.', freeze_text: 'WAIT FOR IT…', edit_style: 'full' as const }
-    : await writeCopy(cfg, cand, transcript?.text);
+    : await writeCopy(cfg, cand, transcript?.text, frames);
   log.info(`copy: headline="${copy.headline}" commentary="${copy.commentary}"`);
   const vo = offline ? null : await synthesiseCommentary(cfg, copy.commentary, path.join(dir, 'demo_vo.mp3'));
 
@@ -75,5 +88,5 @@ export async function runDemo(cfg: Config, flags: Record<string, string | boolea
   const commentaryMode = (['outro_voice', 'text_only', 'none'].includes(String(flags.commentary)) ? String(flags.commentary) : copy.commentary_mode ?? 'outro_voice') as 'outro_voice' | 'text_only' | 'none';
   const r = await renderShort(cfg, t, { clipPath: clip, headline: copy.headline, commentary: copy.commentary, commentaryMode, voPath: vo, words: transcript?.words ?? null, musicPath: pickMusic(cfg, 'funny_animals'), outPath: out, workDir: dir, timeline });
   log.info(`demo rendered: ${r.outPath} (${r.durationSec.toFixed(2)}s, edited clip ${r.editedClipSec}s) thumbnail ${r.thumbnailPath}`);
-  fs.writeFileSync(path.join(dir, 'demo_copy.json'), JSON.stringify({ copy, transcript: transcript?.text ?? null, vo: !!vo, peak: analysis.peak, beats: timeline.beats, dropped: timeline.dropped }, null, 2));
+  fs.writeFileSync(path.join(dir, 'demo_copy.json'), JSON.stringify({ copy, transcript: transcript?.text ?? null, vo: !!vo, peak: analysis.peak, beats: timeline.beats, dropped: timeline.dropped, visual_summary: cand.visual_summary, detected_handle: cand.detected_handle, detected_platform: cand.detected_platform, copyright_risk: cand.copyright_risk }, null, 2));
 }

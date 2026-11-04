@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
 import { analyzeClip } from './analyze.js';
+import { contactSheet, sheetBase64, sheetPathFor } from './frames.js';
 import { log, type Config } from '../config.js';
 import type { Store } from '../store.js';
 import { transcribe } from './captions.js';
@@ -22,7 +23,8 @@ export function rightsPolicy(cfg: Config): RightsPolicy {
   return { transformationReview: cfg.transformationReview, maxCopyrightRisk: cfg.maxCopyrightRisk };
 }
 
-export async function produceCandidate(cfg: Config, store: Store, c: Candidate, opts: { allowOkTier?: boolean } = {}): Promise<Production | null> {
+export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate, opts: { allowOkTier?: boolean } = {}): Promise<Production | null> {
+  let c = cIn;
   const dir = path.join(cfg.workDir, 'jobs', c.id);
   fs.mkdirSync(dir, { recursive: true });
   const now = () => new Date().toISOString();
@@ -65,8 +67,23 @@ export async function produceCandidate(cfg: Config, store: Store, c: Candidate, 
     const audio = await extractAudio(src, path.join(dir, 'audio.mp3'));
     const transcript = audio ? await transcribe(cfg, audio) : null;
 
+    // vision pass: contact sheet -> re-score with frames (detects watermarks / real creator, grounds the copy in what happens)
+    const sheet = await contactSheet(src, sheetPathFor(dir)).catch(() => null);
+    const frames = sheet ? sheetBase64(sheet) : undefined;
+    if (frames) {
+      const rescored = await scoreCandidate(cfg, { ...c, status: 'discovered' }, await store.weights(), transcript?.text, frames);
+      if (rescored.status === 'rejected_safety' || rescored.status === 'blocked_rights' || rescored.status === 'rejected_score') {
+        await store.patchCandidate(c.id, { status: rescored.status, status_reason: `vision pass: ${rescored.status_reason}`, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null });
+        log.info(`vision pass stopped ${c.id}: ${rescored.status} (${rescored.status_reason})`);
+        return null;
+      }
+      c = { ...c, llm_score: rescored.llm_score, final_score: rescored.final_score, llm_rationale: rescored.llm_rationale, safety_flags: rescored.safety_flags, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null };
+      await store.patchCandidate(c.id, { llm_score: c.llm_score, final_score: c.final_score, llm_rationale: c.llm_rationale, safety_flags: c.safety_flags, copyright_risk: c.copyright_risk, copyright_risk_reasons: c.copyright_risk_reasons, detected_handle: c.detected_handle, detected_platform: c.detected_platform, visual_summary: c.visual_summary });
+      if (c.detected_handle) log.info(`vision: footage credits @${c.detected_handle}${c.detected_platform ? ` (${c.detected_platform})` : ''}; crediting them`);
+    }
+
     // copy + edit direction
-    const copy = await writeCopy(cfg, c, transcript?.text);
+    const copy = await writeCopy(cfg, c, transcript?.text, frames);
     const commentaryMode: CommentaryMode = cfg.commentaryDefault === 'never' ? 'none' : cfg.commentaryDefault === 'always' ? 'outro_voice' : (copy.commentary_mode ?? 'outro_voice');
     const vo = commentaryMode === 'outro_voice' ? await synthesiseCommentary(cfg, copy.commentary, path.join(dir, 'vo.mp3')) : null;
 

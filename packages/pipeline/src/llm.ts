@@ -4,12 +4,17 @@ import type { Config } from './config.js';
  * Tiny JSON-mode chat wrapper for OpenAI or Anthropic. Returns parsed JSON or throws.
  * Both providers are reached with plain fetch so the pipeline has no SDK dependency.
  */
-export async function chatJson<T>(cfg: Config, system: string, user: string, opts: { maxTokens?: number; temperature?: number } = {}): Promise<T> {
+export interface ChatOpts { maxTokens?: number; temperature?: number; imageJpegBase64?: string }
+
+export async function chatJson<T>(cfg: Config, system: string, user: string, opts: ChatOpts = {}): Promise<T> {
   const text = cfg.llmProvider === 'anthropic' ? await anthropic(cfg, system, user, opts) : await openai(cfg, system, user, opts);
   return parseJson<T>(text);
 }
 
-async function openai(cfg: Config, system: string, user: string, opts: { maxTokens?: number; temperature?: number }): Promise<string> {
+async function openai(cfg: Config, system: string, user: string, opts: ChatOpts): Promise<string> {
+  const content: unknown = opts.imageJpegBase64
+    ? [{ type: 'text', text: user }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${opts.imageJpegBase64}`, detail: 'low' } }]
+    : user;
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.openaiKey ?? 'proxy-injected'}` },
@@ -18,7 +23,7 @@ async function openai(cfg: Config, system: string, user: string, opts: { maxToke
       temperature: opts.temperature ?? 0.7,
       max_tokens: opts.maxTokens ?? 600,
       response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      messages: [{ role: 'system', content: system }, { role: 'user', content }],
     }),
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -26,7 +31,10 @@ async function openai(cfg: Config, system: string, user: string, opts: { maxToke
   return j.choices[0].message.content;
 }
 
-async function anthropic(cfg: Config, system: string, user: string, opts: { maxTokens?: number; temperature?: number }): Promise<string> {
+async function anthropic(cfg: Config, system: string, user: string, opts: ChatOpts): Promise<string> {
+  const userContent: unknown = opts.imageJpegBase64
+    ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: opts.imageJpegBase64 } }, { type: 'text', text: user }]
+    : user;
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': cfg.anthropicKey ?? '', 'anthropic-version': '2023-06-01' },
@@ -35,7 +43,7 @@ async function anthropic(cfg: Config, system: string, user: string, opts: { maxT
       max_tokens: opts.maxTokens ?? 600,
       temperature: opts.temperature ?? 0.7,
       system: `${system}\nRespond with a single JSON object and nothing else.`,
-      messages: [{ role: 'user', content: user }],
+      messages: [{ role: 'user', content: userContent }],
     }),
   });
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);

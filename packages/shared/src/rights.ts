@@ -56,11 +56,14 @@ export const DEFAULT_CONTACT_EMAIL = 'theunhingedtoaster@gmail.com';
  * PUBLIC credit block appended to every description. Creator name/handle when identifiable, source URL, what we
  * changed, and the contact address. It deliberately makes no claim of authorisation or fair use.
  */
-export function creditText(c: Pick<Candidate, 'author' | 'source_url' | 'rights_basis' | 'source_platform'>, opts: { contactEmail?: string; editsSummary?: string } = {}): string {
+export function creditText(c: Pick<Candidate, 'author' | 'source_url' | 'rights_basis' | 'source_platform'> & Partial<Pick<Candidate, 'detected_handle' | 'detected_platform'>>, opts: { contactEmail?: string; editsSummary?: string } = {}): string {
   const email = opts.contactEmail ?? DEFAULT_CONTACT_EMAIL;
   const who = c.author ? displayHandle(c.author, c.source_platform) : 'original creator (uncredited – contact us to be credited)';
+  const visible = c.detected_handle ? `@${c.detected_handle.replace(/^@/, '')}${c.detected_platform ? ` on ${capitalize(c.detected_platform)}` : ''}` : null;
   const lines = [
-    `🎬 Original clip: ${who} — ${c.source_url}`,
+    visible
+      ? `🎬 Original clip: ${visible} (as credited in the footage) — found via ${who}: ${c.source_url}`
+      : `🎬 Original clip: ${who} — ${c.source_url}`,
     `✂️ Edited by The Unhinged Toaster: ${opts.editsSummary ?? 'original comedic commentary, cuts, zooms, freeze-frames, captions and animated visuals'}.`,
   ];
   switch (c.rights_basis) {
@@ -75,6 +78,8 @@ export function creditText(c: Pick<Candidate, 'author' | 'source_url' | 'rights_
   lines.push(`📩 Copyright inquiries, credit corrections or removal requests: ${email}`);
   return lines.join('\n');
 }
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function displayHandle(author: string, platform: SourcePlatform): string {
   const a = author.trim().replace(/^@/, '');
