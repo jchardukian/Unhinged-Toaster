@@ -1,6 +1,7 @@
 import { ccProvenanceRisk, qualityTier, ulid, initialRights, type Candidate, type ContentCategory, type SourceAdapter, type SourcePlatform } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { withRetry } from '../retry.js';
+import { ytdlpJson } from './media.js';
 
 /**
  * Discovery adapters. Each returns Candidate rows in status 'discovered' with the rights status that
@@ -25,6 +26,8 @@ export async function discoverAll(cfg: Config, opts: DiscoverOptions): Promise<C
         : s === 'internet_archive' ? await discoverInternetArchive(cfg, opts.limitPerSource)
         : s === 'youtube_trending' ? await discoverYouTubeTrending(cfg, opts.limitPerSource)
         : s === 'reddit_rss' ? await discoverRedditRss(cfg, opts.limitPerSource)
+        : s === 'tiktok' ? await discoverTikTok(cfg, opts.limitPerSource)
+        : s === 'youtube_search' ? await discoverYouTubeSearch(cfg, opts.limitPerSource)
         : [];
       log.info(`discover:${s} -> ${found.length} candidates`);
       out.push(...found);
@@ -259,6 +262,82 @@ export async function discoverRedditRss(cfg: Config, limit: number, window: 'day
   }
   return out;
 }
+
+// ---------------------------------------------------------------- TikTok (creator accounts via yt-dlp; real view/like/comment/repost counts)
+/**
+ * TikTok has no public API for third-party discovery and its hashtag pages block scrapers, but creator profile pages
+ * work through yt-dlp and expose per-video engagement. The owner curates `TIKTOK_ACCOUNTS` (original creators, not
+ * compilation/licensing accounts); recent videos are ranked by views. Footage goes to transformation review.
+ */
+export async function discoverTikTok(cfg: Config, limit: number, maxAgeDays = 14): Promise<Candidate[]> {
+  if (cfg.tiktokAccounts.length === 0) throw new Error('TIKTOK_ACCOUNTS not set (comma-separated creator handles)');
+  const now = new Date().toISOString();
+  const out: Candidate[] = [];
+  const minTs = Date.now() / 1000 - maxAgeDays * 86400;
+  for (const handle of cfg.tiktokAccounts) {
+    const rows = await ytdlpJson(`https://www.tiktok.com/@${handle}`, { flat: true, limit: Math.min(60, limit) }).catch(() => []);
+    log.info(`tiktok @${handle}: ${rows.length} recent videos`);
+    for (const r of rows) {
+      const id = String(r.id ?? '');
+      const dur = Number(r.duration ?? 0);
+      const ts = Number(r.timestamp ?? 0);
+      if (!id || dur < 4 || dur > 55) continue;
+      if (ts && ts < minTs) continue;
+      const title = String(r.title ?? r.description ?? '').trim() || `TikTok by @${handle}`;
+      const prov = ccProvenanceRisk({ title, description: String(r.description ?? ''), channelTitle: handle, durationSec: dur });
+      out.push({
+        ...base('tiktok', now),
+        source_id: id, source_url: String(r.webpage_url ?? r.url ?? `https://www.tiktok.com/@${handle}/video/${id}`), media_url: null,
+        author: handle, author_url: `https://www.tiktok.com/@${handle}`, title: title.slice(0, 200), description: String(r.description ?? '').slice(0, 500) || null,
+        category: guessCategory(title), duration_sec: dur, width: numOr(r.width), height: numOr(r.height),
+        published_at: ts ? new Date(ts * 1000).toISOString() : null,
+        views: numOr(r.view_count), likes: numOr(r.like_count), comments: numOr(r.comment_count), shares: numOr(r.repost_count), engagement_velocity: null,
+        ...initialRights('tiktok', {}),
+        copyright_risk: prov.risk === 'high' ? 'high' : null, copyright_risk_reasons: prov.reasons.length ? JSON.stringify(prov.reasons) : null,
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- YouTube search via yt-dlp (no API key; real view/like counts)
+const YT_SEARCH_QUERIES: { q: string; category: ContentCategory }[] = [
+  { q: 'funny dog fail #shorts', category: 'funny_animals' },
+  { q: 'cat fail #shorts', category: 'funny_animals' },
+  { q: 'instant regret fail #shorts', category: 'people_fails' },
+  { q: 'unexpected ending #shorts', category: 'unbelievable' },
+  { q: 'wholesome surprise reaction #shorts', category: 'wholesome_reactions' },
+];
+
+export async function discoverYouTubeSearch(cfg: Config, limit: number): Promise<Candidate[]> {
+  if (!cfg.enableYoutubeTransform) throw new Error('YouTube search source disabled: set ENABLE_YOUTUBE_TRANSFORM=true (see docs/SOURCES.md)');
+  const now = new Date().toISOString();
+  const out: Candidate[] = [];
+  for (const { q, category } of YT_SEARCH_QUERIES) {
+    const rows = await ytdlpJson(`ytsearch${Math.min(30, limit)}:${q}`, { youtube: true }).catch(() => []);
+    for (const r of rows) {
+      const id = String(r.id ?? ''); const dur = Number(r.duration ?? 0);
+      if (!id || dur < 4 || dur > 60) continue;
+      const title = String(r.title ?? '');
+      const channel = String(r.channel ?? r.uploader ?? '');
+      const license = String(r.license ?? '');
+      const prov = ccProvenanceRisk({ title, description: String(r.description ?? ''), channelTitle: channel, durationSec: dur });
+      const rights = /creative commons/i.test(license)
+        ? initialRights('youtube', { license: 'creativeCommon', provenanceRisk: prov.risk, provenanceReasons: prov.reasons, evidenceSuffix: `; yt-dlp license field "${license}"` })
+        : initialRights('youtube', { license: 'youtube' });
+      out.push({
+        ...base('youtube', now), source_id: id, source_url: `https://www.youtube.com/watch?v=${id}`, media_url: null,
+        author: channel, author_url: r.channel_url ? String(r.channel_url) : null, title, description: String(r.description ?? '').slice(0, 500) || null,
+        category, duration_sec: dur, width: numOr(r.width), height: numOr(r.height), published_at: r.timestamp ? new Date(Number(r.timestamp) * 1000).toISOString() : null,
+        views: numOr(r.view_count), likes: numOr(r.like_count), comments: numOr(r.comment_count), shares: null, engagement_velocity: null,
+        ...rights, copyright_risk: prov.risk === 'high' ? 'high' : null, copyright_risk_reasons: prov.reasons.length ? JSON.stringify(prov.reasons) : null,
+      });
+    }
+  }
+  return dedupeById(out);
+}
+
+const numOr = (v: unknown) => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
 
 export interface RedditAtomEntry { postId: string; title: string; link: string; author: string | null; published: string | null; mediaId: string | null }
 

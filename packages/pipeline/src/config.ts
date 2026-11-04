@@ -47,6 +47,10 @@ export interface Config {
   commentaryDefault: 'auto' | 'always' | 'never';
   allowLowQuality: boolean;
   musicDefault: 'auto' | 'always' | 'never';
+  stickers: boolean;
+  tiktokAccounts: string[];
+  ytdlpCookiesB64: string | undefined;
+  ytdlpYoutubeClients: string;
   youtubeKey: string | undefined;
   enableYoutubeCc: boolean;
   enableYoutubeTransform: boolean;
@@ -88,6 +92,10 @@ export function loadConfig(): Config {
     bufferTagClearedId: e.BUFFER_TAG_CLEARED_ID || undefined,
     contactEmail: e.CONTACT_EMAIL || 'theunhingedtoaster@gmail.com',
     allowLowQuality: e.ALLOW_LOW_QUALITY === 'true',
+    stickers: e.STICKERS === 'true',
+    tiktokAccounts: (e.TIKTOK_ACCOUNTS ?? '').split(',').map((x) => x.trim().replace(/^@/, '')).filter(Boolean),
+    ytdlpCookiesB64: e.YTDLP_COOKIES_B64 || undefined,
+    ytdlpYoutubeClients: e.YTDLP_YOUTUBE_CLIENTS || 'android,ios,web',
     musicDefault: (['auto', 'always', 'never'].includes(e.MUSIC_DEFAULT ?? '') ? e.MUSIC_DEFAULT : 'auto') as 'auto' | 'always' | 'never',
     commentaryDefault: (['auto', 'always', 'never'].includes(e.COMMENTARY_DEFAULT ?? '') ? e.COMMENTARY_DEFAULT : 'auto') as 'auto' | 'always' | 'never',
     youtubeKey: e.YOUTUBE_API_KEY,

@@ -80,6 +80,7 @@ function displayHandle(author: string, platform: SourcePlatform): string {
   const a = author.trim().replace(/^@/, '');
   if (platform === 'reddit') return `u/${a.replace(/^u\//, '')}`;
   if (platform === 'youtube') return a; // channel title
+  if (platform === 'tiktok') return `@${a} on TikTok`;
   return `@${a}`;
 }
 
@@ -148,6 +149,8 @@ export function initialRights(platform: SourcePlatform, meta: RightsMeta): Pick<
       return { rights_status: 'cleared', rights_basis: 'pixabay_license', rights_evidence: `https://pixabay.com/service/license-summary/${meta.evidenceSuffix ?? ''}`, rights_notes: 'Pixabay Content License: commercial use OK, no attribution required, must be transformed (we add template/captions/commentary); no unmodified redistribution.' };
     case 'licensed_library':
       return { rights_status: 'cleared', rights_basis: 'licensed', rights_evidence: meta.license ?? 'license id missing', rights_notes: null };
+    case 'tiktok':
+      return { rights_status: 'transformation_review', rights_basis: null, rights_evidence: null, rights_notes: 'TikTok user upload, no reuse license on file. Eligible for transformation review only (owner decides per draft). Creator handle credited.' };
     case 'reddit':
       return { rights_status: 'transformation_review', rights_basis: null, rights_evidence: null, rights_notes: 'User-generated, no reuse license on file. Eligible for transformation review only (owner decides per draft). Attribution to the poster is always included.' };
     case 'manual':

@@ -16,7 +16,7 @@ Pick category from: ${CONTENT_CATEGORIES.join(', ')}.
 safety_flags (array, possibly empty) from: nsfw, hate, graphic_injury, mild_injury, death, animal_cruelty, self_harm,
 minor_humiliation (a child being mocked), minor_visible, private_person_mocking (laughing AT a non-public person in a humiliating way),
 copyrighted_music, profanity, brand_logos, political, dangerous_stunt_imitable.
-Be strict with safety. rationale: one sentence.
+Be strict with safety. rationale: one sentence. Respond with a single JSON object containing all fields.
 Also assess copyright_risk for reusing this footage in a transformed commentary short WITHOUT a license from the owner:
 - "high": professional/broadcast/TV/film/sports-league/news-agency footage, music videos, clips with a prominent commercial music track as the point, stock-agency watermarks, footage from another commentary/compilation channel, or any indication the poster is not the person who filmed it
 - "medium": ordinary user-filmed clip but the poster may not be the filmer, or there is background commercial music, or identifiable third parties are the joke
@@ -39,7 +39,7 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
     }), { temperature: 0.2, maxTokens: 400 });
     llm = sanitise(llm);
     const cr = llm.copyright_risk;
-    if (cr === 'low' || cr === 'medium' || cr === 'high') {
+    if ((cr === 'low' || cr === 'medium' || cr === 'high') && c.copyright_risk !== 'high') {
       c = { ...c, copyright_risk: cr, copyright_risk_reasons: JSON.stringify(llm.copyright_risk_reasons ?? []) };
     }
   } catch (e) {
@@ -49,7 +49,8 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
   if (!llm) {
     // Without an LLM we only trust the heuristic, discounted, and we never auto-pass safety.
     const f = finalScore(h, h * 0.8, c.category, weights);
-    return { ...c, heuristic_score: h, llm_score: null, final_score: f, status: f >= MIN_FINAL_SCORE ? 'scored' : 'rejected_score', status_reason: 'heuristic_only', updated_at: now };
+    const blockedByProvenance = c.copyright_risk === 'high' && c.rights_status !== 'cleared';
+    return { ...c, heuristic_score: h, llm_score: null, final_score: f, status: blockedByProvenance ? 'blocked_rights' : f >= MIN_FINAL_SCORE ? 'scored' : 'rejected_score', status_reason: blockedByProvenance ? 'copyright_risk high (provenance)' : 'heuristic_only', updated_at: now };
   }
   const { score, blocked, reason } = llmScore(llm);
   const category = CONTENT_CATEGORIES.includes(llm.category) ? llm.category : c.category;
@@ -59,6 +60,8 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
   if (blocked) { status = 'rejected_safety'; status_reason = reason ?? 'safety'; }
   else if (f < MIN_FINAL_SCORE) { status = 'rejected_score'; status_reason = `final ${f} < ${MIN_FINAL_SCORE}`; }
   else if (c.rights_status === 'transformation_review' && c.copyright_risk === 'high') { status = 'blocked_rights'; status_reason = `copyright_risk high: ${(JSON.parse(c.copyright_risk_reasons ?? '[]') as string[]).slice(0, 3).join('; ')}`; }
+  // provenance heuristics can mark risk high before the LLM runs (compilation / licensing accounts): never produce those
+  if (status === 'scored' && c.copyright_risk === 'high' && c.rights_status !== 'cleared') { status = 'blocked_rights'; status_reason = `copyright_risk high (provenance): ${(JSON.parse(c.copyright_risk_reasons ?? '[]') as string[]).slice(0, 3).join('; ')}`; }
   return {
     ...c, heuristic_score: h, llm_score: score, final_score: f, category, llm_rationale: llm.rationale,
     safety_flags: JSON.stringify(llm.safety_flags), status, status_reason, updated_at: now,

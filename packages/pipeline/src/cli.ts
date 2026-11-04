@@ -23,7 +23,7 @@ Daily / weekly automation
   report [--week current|next] [--json]   weekly readiness report (21 targets, funnel, shortages, blockers)
 
 Individual steps
-  discover [--sources reddit,youtube_trending,youtube,pixabay,pexels,internet_archive] [--limit 50]
+  discover [--sources reddit_rss,reddit,tiktok,youtube_search,youtube_trending,youtube,pixabay,pexels,internet_archive] [--limit 50]
   score
   produce [--count N | --id CANDIDATE_ID]
   publish [--dry-run]
@@ -201,7 +201,8 @@ function defaultSources(cfg: Config): string {
   if (cfg.sources) return cfg.sources;
   const s: string[] = [];
   if (cfg.transformationReview) s.push(cfg.reddit.clientId ? 'reddit' : 'reddit_rss');
-  if (cfg.youtubeKey && cfg.enableYoutubeTransform && cfg.transformationReview) s.push('youtube_trending');
+  if (cfg.transformationReview && cfg.tiktokAccounts.length) s.push('tiktok');
+  if (cfg.enableYoutubeTransform && cfg.transformationReview) s.push(cfg.youtubeKey ? 'youtube_trending' : 'youtube_search');
   if (cfg.youtubeKey && cfg.enableYoutubeCc) s.push('youtube');
   if (cfg.pixabayKey) s.push('pixabay');
   if (cfg.pexelsKey) s.push('pexels');
@@ -232,7 +233,8 @@ function doctor(cfg: Config) {
   check('Pexels key (auto-clearable source)', !!cfg.pexelsKey, 'PEXELS_API_KEY (free)');
   check('YouTube CC source', !!cfg.youtubeKey && cfg.enableYoutubeCc, 'YOUTUBE_API_KEY + ENABLE_YOUTUBE_CC=true (read docs/SOURCES.md first)');
   check('Reddit app (viral source, transformation review)', !!cfg.reddit.clientId, 'optional: without it the public RSS feeds are used (no scores, rank proxy)');
-  check('YouTube trending (transformation review)', !!cfg.youtubeKey && cfg.enableYoutubeTransform, 'YOUTUBE_API_KEY + ENABLE_YOUTUBE_TRANSFORM=true');
+  check('TikTok creator accounts (transformation review)', cfg.tiktokAccounts.length > 0, 'TIKTOK_ACCOUNTS=handle1,handle2 (original creators)');
+  check('YouTube (transformation review)', cfg.enableYoutubeTransform, 'ENABLE_YOUTUBE_TRANSFORM=true (+ YOUTUBE_API_KEY for the trending chart; YTDLP_COOKIES_B64 if downloads get bot-walled)');
   check(`Transformation review ${cfg.transformationReview ? 'ON' : 'OFF'} (max risk ${cfg.maxCopyrightRisk})`, true);
   check('R2 credentials', !!(cfg.r2.accountId && cfg.r2.accessKeyId && cfg.r2.publicBaseUrl), 'R2_* vars; Buffer needs a public video URL');
   check('Control-plane API', !!(cfg.apiUrl && cfg.apiToken), 'TOASTER_API_URL/TOKEN (falls back to work/db.json)');

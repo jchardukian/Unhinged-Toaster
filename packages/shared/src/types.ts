@@ -16,9 +16,9 @@ export const CONTENT_CATEGORIES: ContentCategory[] = [
   'wholesome_reactions',
 ];
 
-export type SourcePlatform = 'reddit' | 'youtube' | 'pexels' | 'pixabay' | 'internet_archive' | 'manual' | 'licensed_library';
+export type SourcePlatform = 'reddit' | 'youtube' | 'tiktok' | 'pexels' | 'pixabay' | 'internet_archive' | 'manual' | 'licensed_library';
 /** Discovery adapter names (a platform can have several adapters). */
-export type SourceAdapter = SourcePlatform | 'youtube_trending' | 'reddit_rss';
+export type SourceAdapter = SourcePlatform | 'youtube_trending' | 'youtube_search' | 'reddit_rss';
 
 /**
  * Rights lifecycle.

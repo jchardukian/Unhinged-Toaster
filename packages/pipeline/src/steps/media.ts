@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { phashFrame, type Candidate } from '@toaster/shared';
@@ -70,7 +71,8 @@ export async function downloadMedia(c: Candidate, dir: string): Promise<string> 
   if (fs.existsSync(out) && fs.statSync(out).size > 10_000) return out;
   switch (c.source_platform) {
     case 'reddit': return downloadReddit(c, out);
-    case 'youtube': return downloadWithYtDlp(c.source_url, out);
+    case 'youtube': return downloadWithYtDlp(c.source_url, out, { youtube: true });
+    case 'tiktok': return downloadWithYtDlp(c.source_url, out, {});
     default:
       if (!c.media_url) throw new Error('no media_url');
       await fetchToFile(c.media_url, out);
@@ -141,15 +143,41 @@ export function parseRedditMpd(xml: string): { video: { file: string; width: num
   return { video, audio: audio.map((x) => x.file) };
 }
 
-async function downloadWithYtDlp(url: string, out: string): Promise<string> {
-  try {
-    await execFileP('yt-dlp', ['--version']);
-  } catch {
-    throw new Error('yt-dlp is not installed (pip install yt-dlp). YouTube CC-BY clips cannot be fetched without it.');
-  }
-  // best video up to 4K (we downscale cleanly), best audio; never a pre-muxed low-quality stream unless nothing else exists
-  await run('yt-dlp', ['-f', 'bv*[height<=2160][ext=mp4]+ba[ext=m4a]/bv*[height<=2160]+ba/b[ext=mp4]/b', '--merge-output-format', 'mp4', '--no-playlist', '-o', out, url]);
+/**
+ * yt-dlp download (TikTok, YouTube). Best video up to 4K + best audio, merged to mp4.
+ * YouTube from datacenter IPs often needs an alternate player client or the owner's exported cookies
+ * (YTDLP_COOKIES_B64 = base64 of a Netscape cookies.txt); both are applied when configured.
+ */
+export async function downloadWithYtDlp(url: string, out: string, opts: { youtube?: boolean }): Promise<string> {
+  try { await execFileP('yt-dlp', ['--version']); } catch { throw new Error('yt-dlp is not installed (pip install yt-dlp)'); }
+  const args = ['--no-warnings', '--no-playlist', '-f', 'bv*[height<=2160][ext=mp4]+ba[ext=m4a]/bv*[height<=2160]+ba/b[ext=mp4]/b', '--merge-output-format', 'mp4', '-o', out];
+  for (const a of ytdlpCommonArgs(opts.youtube ?? false)) args.push(a);
+  args.push(url);
+  await run('yt-dlp', args);
   return out;
+}
+
+export function ytdlpCommonArgs(youtube: boolean): string[] {
+  const args: string[] = [];
+  const cookies = process.env.YTDLP_COOKIES_B64;
+  if (cookies) {
+    const file = path.join(os.tmpdir(), 'toaster-cookies.txt');
+    if (!fs.existsSync(file)) fs.writeFileSync(file, Buffer.from(cookies, 'base64'));
+    args.push('--cookies', file);
+  }
+  if (youtube) args.push('--extractor-args', `youtube:player_client=${process.env.YTDLP_YOUTUBE_CLIENTS || 'android,ios,web'}`);
+  return args;
+}
+
+/** Metadata-only yt-dlp call (flat playlist for channel/user pages, or full info for a search/video). */
+export async function ytdlpJson(target: string, opts: { flat?: boolean; limit?: number; youtube?: boolean }): Promise<Record<string, unknown>[]> {
+  const args = ['--no-warnings', '--skip-download', '--dump-json', '--ignore-errors'];
+  if (opts.flat) args.push('--flat-playlist');
+  if (opts.limit) args.push('--playlist-end', String(opts.limit));
+  for (const a of ytdlpCommonArgs(opts.youtube ?? false)) args.push(a);
+  args.push(target);
+  const { stdout } = await execFileP('yt-dlp', args, { maxBuffer: 64 << 20 }).catch((e: { stdout?: string }) => ({ stdout: e.stdout ?? '' }));
+  return String(stdout).split('\n').filter((l) => l.trim().startsWith('{')).map((l) => { try { return JSON.parse(l) as Record<string, unknown>; } catch { return null; } }).filter((x): x is Record<string, unknown> => !!x);
 }
 
 export async function fetchToFile(url: string, file: string, headers: Record<string, string> = {}): Promise<void> {
