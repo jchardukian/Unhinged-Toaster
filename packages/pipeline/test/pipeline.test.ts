@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { buildAss, assColor, isHallucination } from '../src/steps/captions.js';
 import { validate, fallback } from '../src/steps/copy.js';
-import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHour, ytViralBucket } from '../src/steps/discover.js';
+import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHour, youtubeFetchGuard, ytMetaFromApi, ytViralBucket } from '../src/steps/discover.js';
 import { ytdlpCommonArgs } from '../src/steps/media.js';
 import { postText } from '../src/steps/publish.js';
 import { JsonStore } from '../src/store.js';
@@ -163,4 +163,17 @@ test('yt-dlp args: node runtime registered for YouTube, default player clients u
   assert.ok(pinned.includes('youtube:player_client=android,web'));
   assert.deepEqual(ytdlpCommonArgs(false, {}), []);
   assert.deepEqual(ytdlpCommonArgs(true, { YTDLP_JS_RUNTIME: 'none' }).filter((a) => a === '--js-runtimes'), []);
+});
+
+test('youtube viral: Data API items map onto the yt-dlp field names; GitHub runners need cookies', () => {
+  const m = ytMetaFromApi({ id: 'abc', snippet: { title: 'T', description: 'D', channelTitle: 'Chan', channelId: 'UC1', publishedAt: '2026-10-20T10:00:00Z' },
+    statistics: { viewCount: '1200000', likeCount: '50000', commentCount: '300' }, contentDetails: { duration: 'PT27S', contentRating: {} }, status: { license: 'youtube' } });
+  assert.equal(m.duration, 27); assert.equal(m.view_count, 1200000); assert.equal(m.channel_url, 'https://www.youtube.com/channel/UC1'); assert.equal(m.license, 'youtube'); assert.equal(m.age_limit, 0);
+  assert.equal(new Date(Number(m.timestamp) * 1000).toISOString(), '2026-10-20T10:00:00.000Z');
+  const cc = ytMetaFromApi({ id: 'x', snippet: { title: 'T', channelTitle: 'C', channelId: 'U', publishedAt: '2026-01-01T00:00:00Z' }, statistics: {}, contentDetails: { duration: 'PT1M2S', contentRating: { ytRating: 'ytAgeRestricted' } }, status: { license: 'creativeCommon' } });
+  assert.equal(cc.duration, 62); assert.match(String(cc.license), /Creative Commons/); assert.equal(cc.age_limit, 18);
+  assert.equal(youtubeFetchGuard({ ytdlpCookiesB64: undefined }, { GITHUB_ACTIONS: 'true' }).blocked, true);
+  assert.equal(youtubeFetchGuard({ ytdlpCookiesB64: 'abc' }, { GITHUB_ACTIONS: 'true' }).blocked, false);
+  assert.equal(youtubeFetchGuard({ ytdlpCookiesB64: undefined }, { GITHUB_ACTIONS: 'true', YTDLP_ASSUME_FETCHABLE: 'true' }).blocked, false);
+  assert.equal(youtubeFetchGuard({ ytdlpCookiesB64: undefined }, {}).blocked, false);
 });

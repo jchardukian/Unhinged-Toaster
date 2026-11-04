@@ -39,6 +39,7 @@ jobs:
           REDDIT_WINDOWS: ${{ vars.REDDIT_WINDOWS }}
           TIKTOK_ACCOUNTS: ${{ vars.TIKTOK_ACCOUNTS }}
           WORK_DIR: ./work
+          YTDLP_ASSUME_FETCHABLE: 'true'   # always try, so the summary shows whether this runner is bot-walled
         run: node packages/pipeline/dist/cli.js discover --dry-run --sources "${{ inputs.sources }}" --limit "${{ inputs.limit }}" --fetch "${{ inputs.fetch }}"
       - uses: actions/upload-artifact@v4
         if: always()

@@ -14,7 +14,9 @@ free tier), Buffer (existing Essentials account), OpenAI (pay-as-you-go, cents/w
 | Buffer tags `REVIEW` / `CLEARED` (optional) | visual marker in Buffer | No | Buffer → Settings → Tags → create both, copy ids → `BUFFER_TAG_REVIEW_ID`, `BUFFER_TAG_CLEARED_ID` (the readiness report lists review drafts regardless) |
 | OpenAI key | scoring, copy, Whisper | The key injected into this session is session-scoped and cannot be exported | Create a project key → `OPENAI_API_KEY` |
 | ElevenLabs key + voice id | commentary voice | Same (session-scoped) | Profile → API keys → `ELEVENLABS_API_KEY`; pick voice → `ELEVENLABS_VOICE_ID` |
-| Reddit script app | primary viral source | No | https://www.reddit.com/prefs/apps → "script" app → `REDDIT_CLIENT_ID/SECRET`, plus the account's `REDDIT_USERNAME/PASSWORD` |
+| **YouTube Data API key** (free) | viral discovery metadata (duration, date, stats) without YouTube's bot wall | No | Google Cloud console → enable "YouTube Data API v3" → API key → `YOUTUBE_API_KEY` (10 000 units/day; the pipeline uses ~100) |
+| **YouTube cookies** (`YTDLP_COOKIES_B64`) | downloading YouTube virals from GitHub-hosted runners (bot-walled otherwise; the CI probe got 0/40) | No | One-time, ~5 min: in a **private** browser window log in to YouTube, export cookies with a "Get cookies.txt LOCALLY" extension, close the window without logging out, then `base64 -w0 cookies.txt` → secret `YTDLP_COOKIES_B64`. Use a secondary Google account: YouTube may flag an account used for automated downloads. Refresh when downloads start failing (every few months). Alternative: a self-hosted runner on a home connection (set `YTDLP_ASSUME_FETCHABLE=true`). Without either, the pipeline skips YouTube and runs on Reddit + fillers. |
+| Reddit script app | viral source (feeds work without it, with ~10 req/min rate limits) | No | https://www.reddit.com/prefs/apps → "script" app → `REDDIT_CLIENT_ID/SECRET`, plus the account's `REDDIT_USERNAME/PASSWORD` |
 | Cloudflare D1 + R2 + Worker | DB, storage, public media, approval poller | No – needs `wrangler login` in the owner's browser once | run `scripts/deploy-cloudflare.sh` |
 | GitHub PAT for the Worker | Worker → `workflow_dispatch` (replacements, weekly kick) | No | fine-grained PAT, repo `Unhinged-Toaster`, Actions: read & write → Worker secret `GITHUB_TOKEN` |
 | Channel descriptions | branding | No (Buffer API cannot edit profiles) | paste `assets/brand/channel_description.txt` (see docs/CHANNEL_DESCRIPTION.md) |
@@ -23,7 +25,7 @@ free tier), Buffer (existing Essentials account), OpenAI (pay-as-you-go, cents/w
 
 ## Fastest path (about 30 minutes of owner time)
 
-1. `cp .env.example .env` and fill: `BUFFER_API_KEY`, `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `REDDIT_*`.
+1. `cp .env.example .env` and fill: `BUFFER_API_KEY`, `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `YOUTUBE_API_KEY`, `YTDLP_COOKIES_B64` (YouTube virals), optional `REDDIT_*`.
 2. `scripts/deploy-cloudflare.sh` (creates D1, R2, applies migrations 0001–0003, sets `API_TOKEN`, deploys; prints
    `TOASTER_API_URL` and `TOASTER_API_TOKEN`). Put both into `.env`. R2 S3 keys are **not** required: the pipeline
    uploads through the Worker (`PUT /upload/<key>`) and Buffer fetches from `<TOASTER_API_URL>/media/<key>`.

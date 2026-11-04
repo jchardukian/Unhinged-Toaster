@@ -6,7 +6,7 @@ import { buildWeekPlan, canProduce, permissionRequestMessage, type Candidate, ty
 import { alert } from './alerts.js';
 import { loadConfig, log, repoRoot, type Config } from './config.js';
 import { makeStore, type Store } from './store.js';
-import { discoverAll } from './steps/discover.js';
+import { discoverAll, youtubeFetchGuard } from './steps/discover.js';
 import { produceCandidate, produceUntil, scoreAll } from './steps/produce.js';
 import { publishWeek } from './steps/publish.js';
 import { readinessReport } from './steps/report.js';
@@ -233,10 +233,12 @@ async function probeSources(cfg: Config, sources: SourceAdapter[], limit: number
 function defaultSources(cfg: Config): string {
   if (cfg.sources) return cfg.sources;
   const s: string[] = [];
-  if (cfg.enableYoutubeTransform && cfg.transformationReview) s.push('youtube_viral');
+  const yt = youtubeFetchGuard(cfg);
+  if (cfg.enableYoutubeTransform && cfg.transformationReview && !yt.blocked) s.push('youtube_viral');
+  else if (cfg.enableYoutubeTransform && yt.blocked) log.warn(`YouTube sources skipped: ${yt.reason}. Add the YTDLP_COOKIES_B64 secret (docs/DEPLOYMENT.md) to enable them.`);
   if (cfg.transformationReview) s.push(cfg.reddit.clientId ? 'reddit' : 'reddit_rss');
   if (cfg.transformationReview && cfg.tiktokAccounts.length) s.push('tiktok');
-  if (cfg.enableYoutubeTransform && cfg.transformationReview && cfg.youtubeKey) s.push('youtube_trending');
+  if (cfg.enableYoutubeTransform && cfg.transformationReview && cfg.youtubeKey && !yt.blocked) s.push('youtube_trending');
   if (cfg.youtubeKey && cfg.enableYoutubeCc) s.push('youtube');
   if (cfg.pixabayKey) s.push('pixabay');
   if (cfg.pexelsKey) s.push('pexels');
@@ -269,7 +271,9 @@ function doctor(cfg: Config) {
   check('YouTube CC source', !!cfg.youtubeKey && cfg.enableYoutubeCc, 'YOUTUBE_API_KEY + ENABLE_YOUTUBE_CC=true (read docs/SOURCES.md first)');
   check('Reddit app (viral source, transformation review)', !!cfg.reddit.clientId, 'optional: without it the public RSS feeds are used (no scores, rank proxy)');
   check('TikTok creator accounts (transformation review)', cfg.tiktokAccounts.length > 0, 'TIKTOK_ACCOUNTS=handle1,handle2 (original creators)');
-  check(`YouTube virals, no key needed (windows: ${cfg.youtubeViralWindows.join(',') || 'none'})`, cfg.enableYoutubeTransform, 'ENABLE_YOUTUBE_TRANSFORM=true (+ YOUTUBE_API_KEY for the most-popular chart; YTDLP_COOKIES_B64 if downloads get bot-walled)');
+  check(`YouTube virals (windows: ${cfg.youtubeViralWindows.join(',') || 'none'})`, cfg.enableYoutubeTransform, 'ENABLE_YOUTUBE_TRANSFORM=true');
+  check('YouTube metadata via Data API (no bot wall)', !!cfg.youtubeKey, 'YOUTUBE_API_KEY (free; without it yt-dlp metadata is used, which GitHub runners cannot reach)');
+  { const g = youtubeFetchGuard(cfg); check('YouTube downloads possible from here', !g.blocked, g.reason + ' -> YTDLP_COOKIES_B64 (see docs/DEPLOYMENT.md)'); }
   check(`Transformation review ${cfg.transformationReview ? 'ON' : 'OFF'} (max risk ${cfg.maxCopyrightRisk})`, true);
   check('R2 credentials', !!(cfg.r2.accountId && cfg.r2.accessKeyId && cfg.r2.publicBaseUrl), 'R2_* vars; Buffer needs a public video URL');
   check('Control-plane API', !!(cfg.apiUrl && cfg.apiToken), 'TOASTER_API_URL/TOKEN (falls back to work/db.json)');

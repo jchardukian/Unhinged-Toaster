@@ -50,6 +50,9 @@ jobs:
         env:
           WORK_DIR: ./work
           YOUTUBE_VIRAL_WINDOWS: today,week,month,alltime
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YTDLP_COOKIES_B64: ${{ secrets.YTDLP_COOKIES_B64 }}
+          YTDLP_ASSUME_FETCHABLE: 'true'   # probe always tries, so the summary shows whether this runner is bot-walled
         run: node packages/pipeline/dist/cli.js discover --dry-run --sources youtube_viral,reddit_rss --limit 20 --fetch 2
       - uses: actions/upload-artifact@v4
         if: always()

@@ -265,7 +265,7 @@ export async function discoverRedditRss(cfg: Config, limit: number, windows: ('d
           ...initialRights('reddit', {}),
         });
       });
-      await sleep(2000); // the feeds answer 429 when hit faster than this
+      await sleep(6500); // unauthenticated Reddit allows ~10 requests/min per IP; GitHub runners 429 at 2 s spacing
     }
   }
   return dedupeById(out);
@@ -426,15 +426,26 @@ export async function discoverYouTubeViral(cfg: Config, limit: number, windows: 
   const picked = pool.slice(0, Math.min(80, Math.max(40, limit * 2)));
   log.info(`youtube_viral shelf rows: ${rows.length} -> unique after filters ${pool.length} -> enriching ${picked.length}`);
   if (picked.length === 0) return [];
+  // Metadata: the Data API (videos.list, 1 quota unit per 50 ids, no bot wall) when YOUTUBE_API_KEY is set, else
+  // yt-dlp's player API, which GitHub-runner IPs cannot reach without the owner's cookies ("sign in to confirm
+  // you're not a bot"; 0/40 in the CI probe) and which is intermittent from other datacenter IPs, hence the retries.
   const meta = new Map<string, Record<string, unknown>>();
-  for (let i = 0; i < picked.length; i += 20) {
-    const batch = picked.slice(i, i + 20);
-    for (let attempt = 1; attempt <= 4; attempt++) {
-      const missing = batch.filter((r) => !meta.has(r.id));
-      if (missing.length === 0) break;
-      const full = await ytdlpJson(missing.map((r) => `https://www.youtube.com/watch?v=${r.id}`), { youtube: true }).catch(() => []);
-      for (const m of full) if (m.id) meta.set(String(m.id), m);
-      if (full.length < missing.length && attempt < 4) { log.warn(`youtube_viral metadata: ${missing.length - full.length}/${missing.length} missing (bot wall?), retry ${attempt}`); await sleep(5000 * attempt); }
+  if (cfg.youtubeKey) {
+    for (let i = 0; i < picked.length; i += 50) {
+      const items = await youtubeVideosApi(cfg.youtubeKey, picked.slice(i, i + 50).map((r) => r.id)).catch((e) => { log.warn(`youtube_viral Data API: ${(e as Error).message}`); return [] as YtVideo[]; });
+      for (const it of items) meta.set(it.id, ytMetaFromApi(it));
+    }
+  }
+  if (meta.size < picked.length && (!cfg.youtubeKey || !youtubeFetchGuard(cfg).blocked)) {
+    for (let i = 0; i < picked.length; i += 20) {
+      const batch = picked.slice(i, i + 20);
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        const missing = batch.filter((r) => !meta.has(r.id));
+        if (missing.length === 0) break;
+        const full = await ytdlpJson(missing.map((r) => `https://www.youtube.com/watch?v=${r.id}`), { youtube: true }).catch(() => []);
+        for (const m of full) if (m.id) meta.set(String(m.id), m);
+        if (full.length < missing.length && attempt < 4) { log.warn(`youtube_viral metadata: ${missing.length - full.length}/${missing.length} missing (bot wall?), retry ${attempt}`); await sleep(5000 * attempt); }
+      }
     }
   }
   log.info(`youtube_viral enriched ${meta.size}/${picked.length}`);
@@ -480,6 +491,37 @@ export async function discoverYouTubeViral(cfg: Config, limit: number, windows: 
   for (const c of out) { const w = c.description?.match(/^YouTube viral \((\w+)\)/)?.[1] ?? '?'; byWindow[w] = (byWindow[w] ?? 0) + 1; }
   log.info(`youtube_viral candidates by window: ${JSON.stringify(byWindow)}; dropped ${JSON.stringify(dropped)}`);
   return dedupeById(out);
+}
+
+/** YouTube Data API videos.list for up to 50 ids (snippet, statistics, contentDetails, status). */
+export async function youtubeVideosApi(key: string, ids: string[]): Promise<YtVideo[]> {
+  if (ids.length === 0) return [];
+  const vp = new URLSearchParams({ part: 'snippet,statistics,contentDetails,status', id: ids.join(','), key });
+  const res = await withRetry('youtube videos.list', () => fetch(`https://www.googleapis.com/youtube/v3/videos?${vp}`), { attempts: 3 });
+  if (!res.ok) throw new Error(`videos.list ${res.status}`);
+  return ((await res.json()) as { items?: YtVideo[] }).items ?? [];
+}
+
+/** Map a Data API video item onto the yt-dlp metadata field names the viral adapter reads. Pure, for tests. */
+export function ytMetaFromApi(it: YtVideo): Record<string, unknown> {
+  return {
+    id: it.id, title: it.snippet.title, description: it.snippet.description ?? '', channel: it.snippet.channelTitle,
+    channel_url: `https://www.youtube.com/channel/${it.snippet.channelId}`, timestamp: Math.floor(new Date(it.snippet.publishedAt).getTime() / 1000),
+    duration: isoDurationSec(it.contentDetails.duration), view_count: num(it.statistics.viewCount), like_count: num(it.statistics.likeCount), comment_count: num(it.statistics.commentCount),
+    license: it.status.license === 'creativeCommon' ? 'Creative Commons Attribution license (reuse allowed)' : 'youtube',
+    age_limit: it.contentDetails.contentRating?.ytRating === 'ytAgeRestricted' ? 18 : 0,
+  };
+}
+
+/**
+ * Whether YouTube media can be fetched from where the pipeline runs. GitHub-hosted runners are bot-walled by
+ * YouTube's player API unless the owner's exported cookies are configured (YTDLP_COOKIES_B64); elsewhere it is
+ * attempted. YTDLP_ASSUME_FETCHABLE=true overrides the guard (self-hosted runner, proxy).
+ */
+export function youtubeFetchGuard(cfg: Pick<Config, 'ytdlpCookiesB64'>, env: NodeJS.ProcessEnv = process.env): { blocked: boolean; reason: string } {
+  if (env.YTDLP_ASSUME_FETCHABLE === 'true' || cfg.ytdlpCookiesB64) return { blocked: false, reason: '' };
+  if (env.GITHUB_ACTIONS === 'true') return { blocked: true, reason: 'GitHub-hosted runner without YTDLP_COOKIES_B64: YouTube answers "sign in to confirm you\'re not a bot" (0/40 in the CI probe)' };
+  return { blocked: false, reason: '' };
 }
 
 export function fmtCount(n: number | null): string {
