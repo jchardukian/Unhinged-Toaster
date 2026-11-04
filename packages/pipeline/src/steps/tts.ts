@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { log, type Config } from '../config.js';
+import { recordTts } from '../usage.js';
 
 /**
  * ElevenLabs text-to-speech for the toaster's one-line commentary.
@@ -22,6 +23,7 @@ export async function synthesiseCommentary(cfg: Config, text: string, out: strin
     });
     if (!res.ok) throw new Error(`elevenlabs ${res.status}: ${(await res.text()).slice(0, 200)}`);
     fs.writeFileSync(out, Buffer.from(await res.arrayBuffer()));
+    recordTts(text.length);
     return out;
   } catch (e) {
     log.warn(`TTS failed: ${(e as Error).message}`);

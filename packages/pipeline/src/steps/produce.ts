@@ -13,6 +13,7 @@ import { scoreCandidate } from './score.js';
 import { synthesiseCommentary } from './tts.js';
 import { uploadPublic } from './upload.js';
 import { withRetry } from '../retry.js';
+import { recordRender, recordUpload } from '../usage.js';
 
 /**
  * Turn ONE cleared, scored candidate into a finished Production:
@@ -113,10 +114,13 @@ export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate
 
     // render
     const outPath = path.join(dir, `${c.id}.final.mp4`);
+    const renderStart = Date.now();
     const r = await withRetry(`render ${c.id}`, () => renderShort(cfg, template, {
       clipPath: src, headline: copy.headline, commentary: copy.commentary, commentaryMode, voPath: vo, words: transcript?.words ?? null,
       musicPath: cfg.musicDefault === 'never' ? null : (copy.music === 'none' && cfg.musicDefault !== 'always') ? null : pickMusic(cfg, c.category), outPath, workDir: dir, timeline,
     }), { attempts: 2, baseMs: 1000 });
+    recordRender((Date.now() - renderStart) / 1000);
+    recordUpload(fs.statSync(outPath).size + (fs.existsSync(r.thumbnailPath) ? fs.statSync(r.thumbnailPath).size : 0));
 
     // upload
     const key = `renders/${c.id}/${path.basename(outPath)}`;

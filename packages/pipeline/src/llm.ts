@@ -1,4 +1,5 @@
 import type { Config } from './config.js';
+import { recordLlm } from './usage.js';
 
 /**
  * Tiny JSON-mode chat wrapper for OpenAI or Anthropic. Returns parsed JSON or throws.
@@ -27,7 +28,8 @@ async function openai(cfg: Config, system: string, user: string, opts: ChatOpts)
     }),
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const j = (await res.json()) as { choices: { message: { content: string } }[] };
+  const j = (await res.json()) as { choices: { message: { content: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+  recordLlm(cfg.llmModel, j.usage?.prompt_tokens ?? 0, j.usage?.completion_tokens ?? 0);
   return j.choices[0].message.content;
 }
 
@@ -47,7 +49,8 @@ async function anthropic(cfg: Config, system: string, user: string, opts: ChatOp
     }),
   });
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const j = (await res.json()) as { content: { type: string; text?: string }[] };
+  const j = (await res.json()) as { content: { type: string; text?: string }[]; usage?: { input_tokens?: number; output_tokens?: number } };
+  recordLlm(cfg.llmModel, j.usage?.input_tokens ?? 0, j.usage?.output_tokens ?? 0);
   return j.content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('');
 }
 

@@ -423,7 +423,7 @@ export async function discoverYouTubeViral(cfg: Config, limit: number, windows: 
     if (latinRatio(r.title) < 0.6) return false;
     return (r.views ?? 0) >= YT_WINDOW_MIN_VIEWS.today;
   }).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
-  const picked = pool.slice(0, Math.min(80, Math.max(40, limit * 2)));
+  const picked = pool.slice(0, Math.min(80, Math.max(20, limit * 2)));
   log.info(`youtube_viral shelf rows: ${rows.length} -> unique after filters ${pool.length} -> enriching ${picked.length}`);
   if (picked.length === 0) return [];
   // Metadata: the Data API (videos.list, 1 quota unit per 50 ids, no bot wall) when YOUTUBE_API_KEY is set, else

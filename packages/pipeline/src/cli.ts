@@ -10,6 +10,8 @@ import { discoverAll, youtubeFetchGuard } from './steps/discover.js';
 import { produceCandidate, produceUntil, scoreAll } from './steps/produce.js';
 import { publishWeek } from './steps/publish.js';
 import { readinessReport } from './steps/report.js';
+import { fetchProbe, funnelReport } from './steps/funnel.js';
+import { flushUsage } from './usage.js';
 import { learn, syncBuffer } from './steps/sync.js';
 import { runDemo } from './demo.js';
 
@@ -26,6 +28,8 @@ Individual steps
   discover [--sources youtube_viral,reddit_rss,reddit,tiktok,youtube_search,youtube_trending,youtube,pixabay,pexels,internet_archive] [--limit 50]
            [--dry-run [--fetch N]]   print what each source finds without storing it; --fetch downloads the top N to prove the fetch path
   score
+  fetch [--limit N]          download + probe scored candidates without rendering (measures download yield / quality)
+  funnel [--json]            measured funnel discovered -> unique -> scored -> eligible -> downloaded -> quality -> rendered, with costs
   produce [--count N | --id CANDIDATE_ID]
   publish [--dry-run]
   plan                      print next week's 21 slot times
@@ -62,6 +66,14 @@ async function main() {
       return;
     }
     case 'score': { await scoreAll(cfg, store); return; }
+    case 'fetch': { const r = await fetchProbe(cfg, store, Number(flags.limit ?? 30)); log.info(`fetch probe: tried ${r.tried}, ok ${r.ok}, failed/rejected ${r.failed}`); return; }
+    case 'funnel': {
+      const { funnel, markdown } = await funnelReport(cfg, store);
+      console.log(flags.json ? JSON.stringify(funnel, null, 2) : markdown);
+      fs.writeFileSync(path.join(cfg.workDir, 'funnel.md'), markdown);
+      if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown + '\n');
+      return;
+    }
     case 'produce': {
       if (flags.id) {
         const c = await store.getCandidate(String(flags.id));
@@ -299,4 +311,5 @@ export function parseFlags(args: string[]): Record<string, string | boolean> {
   return out;
 }
 
-main().catch((e) => { log.error((e as Error).stack ?? String(e)); process.exit(1); });
+main().then(() => { for (const l of flushUsage(loadConfig().workDir, process.argv[2] ?? 'cli')) log.info(l); })
+  .catch((e) => { log.error((e as Error).stack ?? String(e)); flushUsage(loadConfig().workDir, process.argv[2] ?? 'cli'); process.exit(1); });

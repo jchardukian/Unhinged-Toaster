@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import { log, type Config } from '../config.js';
+import { recordWhisper } from '../usage.js';
+import { mediaDuration } from './media.js';
 
 export interface Word { word: string; start: number; end: number }
 export interface Transcript { text: string; words: Word[] }
@@ -17,6 +19,7 @@ export async function transcribe(cfg: Config, audioFile: string): Promise<Transc
     body: form,
   });
   if (!res.ok) { log.warn(`whisper ${res.status}: ${(await res.text()).slice(0, 200)}`); return null; }
+  recordWhisper((await mediaDuration(audioFile)) ?? 0);
   const j = (await res.json()) as { text: string; words?: Word[] };
   const words = (j.words ?? []).filter((w) => w.word.trim());
   if (words.length === 0 || j.text.trim().length < 2) return null;
