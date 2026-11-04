@@ -157,25 +157,38 @@ export async function downloadWithYtDlp(url: string, out: string, opts: { youtub
   return out;
 }
 
-export function ytdlpCommonArgs(youtube: boolean): string[] {
+/**
+ * Flags shared by every yt-dlp call.
+ * - cookies: YTDLP_COOKIES_B64 (base64 Netscape cookies.txt) when the owner exported them.
+ * - JS runtime: YouTube now requires solving a JavaScript "n" challenge for the media URLs; yt-dlp only auto-detects
+ *   deno, so the Node binary running this pipeline is registered (needs the `yt-dlp-ejs` solver: `pip install "yt-dlp[default]"`).
+ * - player client: yt-dlp's default client set is used unless YTDLP_YOUTUBE_CLIENTS overrides it. (From a datacenter
+ *   IP the default set returned metadata + 1080p formats where ios/web/tv were bot-walled.)
+ */
+export function ytdlpCommonArgs(youtube: boolean, env: NodeJS.ProcessEnv = process.env): string[] {
   const args: string[] = [];
-  const cookies = process.env.YTDLP_COOKIES_B64;
+  const cookies = env.YTDLP_COOKIES_B64;
   if (cookies) {
     const file = path.join(os.tmpdir(), 'toaster-cookies.txt');
     if (!fs.existsSync(file)) fs.writeFileSync(file, Buffer.from(cookies, 'base64'));
     args.push('--cookies', file);
   }
-  if (youtube) args.push('--extractor-args', `youtube:player_client=${process.env.YTDLP_YOUTUBE_CLIENTS || 'android,ios,web'}`);
+  if (youtube) {
+    const runtime = env.YTDLP_JS_RUNTIME ?? `node:${process.execPath}`;
+    if (runtime && runtime !== 'none') args.push('--js-runtimes', runtime);
+    if (env.YTDLP_YOUTUBE_CLIENTS) args.push('--extractor-args', `youtube:player_client=${env.YTDLP_YOUTUBE_CLIENTS}`);
+    args.push('--extractor-args', 'youtubetab:approximate_date'); // upload dates in flat listings (search / hashtag shelves)
+  }
   return args;
 }
 
-/** Metadata-only yt-dlp call (flat playlist for channel/user pages, or full info for a search/video). */
-export async function ytdlpJson(target: string, opts: { flat?: boolean; limit?: number; youtube?: boolean }): Promise<Record<string, unknown>[]> {
+/** Metadata-only yt-dlp call (flat playlist for channel/user pages, or full info for a search/video). Several targets run in one process. */
+export async function ytdlpJson(target: string | string[], opts: { flat?: boolean; limit?: number; youtube?: boolean }): Promise<Record<string, unknown>[]> {
   const args = ['--no-warnings', '--skip-download', '--dump-json', '--ignore-errors'];
   if (opts.flat) args.push('--flat-playlist');
   if (opts.limit) args.push('--playlist-end', String(opts.limit));
   for (const a of ytdlpCommonArgs(opts.youtube ?? false)) args.push(a);
-  args.push(target);
+  args.push(...(Array.isArray(target) ? target : [target]));
   const { stdout } = await execFileP('yt-dlp', args, { maxBuffer: 64 << 20 }).catch((e: { stdout?: string }) => ({ stdout: e.stdout ?? '' }));
   return String(stdout).split('\n').filter((l) => l.trim().startsWith('{')).map((l) => { try { return JSON.parse(l) as Record<string, unknown>; } catch { return null; } }).filter((x): x is Record<string, unknown> => !!x);
 }

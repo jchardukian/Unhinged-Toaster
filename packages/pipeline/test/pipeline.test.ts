@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { buildAss, assColor, isHallucination } from '../src/steps/captions.js';
 import { validate, fallback } from '../src/steps/copy.js';
-import { isoDurationSec, parseRedditCandidate } from '../src/steps/discover.js';
+import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHour, ytViralBucket } from '../src/steps/discover.js';
+import { ytdlpCommonArgs } from '../src/steps/media.js';
 import { postText } from '../src/steps/publish.js';
 import { JsonStore } from '../src/store.js';
 import { parseJson } from '../src/llm.js';
@@ -128,4 +129,38 @@ test('parseRedditMpd picks the highest video rendition and audio from the DASH m
   assert.equal(r.video[0].file, 'CMAF_720.mp4');
   assert.equal(r.video[0].height, 1280);
   assert.equal(r.audio[0], 'CMAF_AUDIO_128.mp4');
+});
+
+test('youtube viral: a clip lands in the freshest window it qualifies for', () => {
+  const all: ('today' | 'week' | 'month' | 'alltime')[] = ['today', 'week', 'month', 'alltime'];
+  assert.equal(ytViralBucket(all, 10, 25_000), 'today');
+  assert.equal(ytViralBucket(all, 10, 5_000), null);          // fresh but not viral yet; alltime needs 1M
+  assert.equal(ytViralBucket(all, 5 * 24, 150_000), 'week');
+  assert.equal(ytViralBucket(all, 20 * 24, 900_000), 'month');
+  assert.equal(ytViralBucket(all, 200 * 24, 40_000_000), 'alltime');
+  assert.equal(ytViralBucket(['alltime'], 10, 25_000), null);   // window not requested
+  assert.equal(ytViralBucket(['week'], 5 * 24, 2_000_000), 'week');
+  assert.equal(ytViralBucket(['today'], null, 2_000_000), null); // no upload date => cannot claim fresh
+});
+
+test('youtube viral: non-Latin titles are skipped, velocity is views per hour, counts format', () => {
+  assert.ok(latinRatio('He Copied the Door Prank… Instant Karma 😂🚪 #shorts') > 0.9);
+  assert.ok(latinRatio('ลำไยทำไมขายแพงกว่าคนอื่น #funny') < 0.6);
+  assert.equal(latinRatio('😂😂 #1'), 1);
+  const now = new Date('2026-11-04T12:00:00Z');
+  assert.equal(viewsPerHour(240000, new Date('2026-11-03T12:00:00Z'), now), 10000);
+  assert.equal(viewsPerHour(500, new Date('2026-11-04T11:59:00Z'), now), 500); // never divides by less than an hour
+  assert.equal(viewsPerHour(null, now, now), null);
+  assert.equal(fmtCount(23475026), '23M'); assert.equal(fmtCount(1_500_000), '1.5M'); assert.equal(fmtCount(2300), '2.3k'); assert.equal(fmtCount(42), '42');
+});
+
+test('yt-dlp args: node runtime registered for YouTube, default player clients unless overridden, cookies only when exported', () => {
+  const yt = ytdlpCommonArgs(true, {});
+  assert.ok(yt.includes('--js-runtimes') && yt[yt.indexOf('--js-runtimes') + 1].startsWith('node:'));
+  assert.ok(!yt.some((a) => a.startsWith('youtube:player_client=')));
+  assert.ok(yt.includes('youtubetab:approximate_date'));
+  const pinned = ytdlpCommonArgs(true, { YTDLP_YOUTUBE_CLIENTS: 'android,web' });
+  assert.ok(pinned.includes('youtube:player_client=android,web'));
+  assert.deepEqual(ytdlpCommonArgs(false, {}), []);
+  assert.deepEqual(ytdlpCommonArgs(true, { YTDLP_JS_RUNTIME: 'none' }).filter((a) => a === '--js-runtimes'), []);
 });

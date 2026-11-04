@@ -52,6 +52,10 @@ export interface Config {
   tiktokAccounts: string[];
   ytdlpCookiesB64: string | undefined;
   ytdlpYoutubeClients: string;
+  /** Timeframes the credential-free YouTube viral adapter scans: today / week / month (gaining traction) and alltime (proven). */
+  youtubeViralWindows: ('today' | 'week' | 'month' | 'alltime')[];
+  /** Reddit top-of windows: day (trending now) and week / month (proven). */
+  redditWindows: ('day' | 'week' | 'month')[];
   youtubeKey: string | undefined;
   enableYoutubeCc: boolean;
   enableYoutubeTransform: boolean;
@@ -97,12 +101,14 @@ export function loadConfig(): Config {
     stickers: e.STICKERS === 'true',
     tiktokAccounts: (e.TIKTOK_ACCOUNTS ?? '').split(',').map((x) => x.trim().replace(/^@/, '')).filter(Boolean),
     ytdlpCookiesB64: e.YTDLP_COOKIES_B64 || undefined,
-    ytdlpYoutubeClients: e.YTDLP_YOUTUBE_CLIENTS || 'android,ios,web',
+    ytdlpYoutubeClients: e.YTDLP_YOUTUBE_CLIENTS || '',
+    youtubeViralWindows: (e.YOUTUBE_VIRAL_WINDOWS || 'today,week,month,alltime').split(',').map((x) => x.trim()).filter((x): x is 'today' | 'week' | 'month' | 'alltime' => ['today', 'week', 'month', 'alltime'].includes(x)),
+    redditWindows: (e.REDDIT_WINDOWS || 'day,week').split(',').map((x) => x.trim()).filter((x): x is 'day' | 'week' | 'month' => ['day', 'week', 'month'].includes(x)),
     musicDefault: (['auto', 'always', 'never'].includes(e.MUSIC_DEFAULT ?? '') ? e.MUSIC_DEFAULT : 'auto') as 'auto' | 'always' | 'never',
     commentaryDefault: (['auto', 'always', 'never'].includes(e.COMMENTARY_DEFAULT ?? '') ? e.COMMENTARY_DEFAULT : 'auto') as 'auto' | 'always' | 'never',
     youtubeKey: e.YOUTUBE_API_KEY,
     enableYoutubeCc: e.ENABLE_YOUTUBE_CC === 'true',
-    enableYoutubeTransform: e.ENABLE_YOUTUBE_TRANSFORM === 'true',
+    enableYoutubeTransform: e.ENABLE_YOUTUBE_TRANSFORM !== 'false',
     transformationReview: e.TRANSFORMATION_REVIEW !== 'false',
     maxCopyrightRisk: (['low', 'medium', 'high'].includes(e.MAX_COPYRIGHT_RISK ?? '') ? e.MAX_COPYRIGHT_RISK : 'medium') as 'low' | 'medium' | 'high',
     sources: e.DISCOVERY_SOURCES || undefined,

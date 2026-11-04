@@ -23,7 +23,8 @@ Daily / weekly automation
   report [--week current|next] [--json]   weekly readiness report (21 targets, funnel, shortages, blockers)
 
 Individual steps
-  discover [--sources reddit_rss,reddit,tiktok,youtube_search,youtube_trending,youtube,pixabay,pexels,internet_archive] [--limit 50]
+  discover [--sources youtube_viral,reddit_rss,reddit,tiktok,youtube_search,youtube_trending,youtube,pixabay,pexels,internet_archive] [--limit 50]
+           [--dry-run [--fetch N]]   print what each source finds without storing it; --fetch downloads the top N to prove the fetch path
   score
   produce [--count N | --id CANDIDATE_ID]
   publish [--dry-run]
@@ -56,6 +57,7 @@ async function main() {
     case 'demo': return runDemo(cfg, flags);
     case 'discover': {
       const sources = String(flags.sources ?? defaultSources(cfg)).split(',').filter(Boolean) as SourceAdapter[];
+      if (flags['dry-run']) { await probeSources(cfg, sources, Number(flags.limit ?? 20), Number(flags.fetch ?? 0)); return; }
       await discoverInto(cfg, store, sources, Number(flags.limit ?? 50));
       return;
     }
@@ -193,6 +195,37 @@ async function discoverInto(cfg: Config, store: Store, sources: SourceAdapter[],
   return fresh.length;
 }
 
+/** `discover --dry-run`: run the adapters, print the top rows per source, optionally download the first N to prove the fetch path on this runner. */
+async function probeSources(cfg: Config, sources: SourceAdapter[], limit: number, fetchN: number): Promise<void> {
+  const { ffprobe, downloadMedia } = await import('./steps/media.js');
+  const lines: string[] = [];
+  const say = (s: string) => { console.log(s); lines.push(s); };
+  const fetched: Candidate[] = [];
+  for (const s of sources) {
+    const found = await discoverAll(cfg, { sources: [s], limitPerSource: limit });
+    const ranked = [...found].sort((a, b) => (b.engagement_velocity ?? 0) - (a.engagement_velocity ?? 0) || (b.views ?? b.likes ?? 0) - (a.views ?? a.likes ?? 0));
+    say(`\n## ${s}: ${found.length} candidates`);
+    say('| views | per hour | dur | size | uploaded | risk | title | source | found via |');
+    say('|---|---|---|---|---|---|---|---|---|');
+    for (const c of ranked.slice(0, 15)) {
+      say(`| ${c.views ?? (c.likes != null ? `~${c.likes} likes` : '?')} | ${c.engagement_velocity ?? '-'} | ${c.duration_sec ?? '?'}s | ${c.width && c.height ? `${c.width}x${c.height}` : '?'} | ${c.published_at?.slice(0, 10) ?? '?'} | ${c.copyright_risk ?? '-'} | ${c.title.replace(/\|/g, '/').slice(0, 70)} | ${c.source_url} | ${(c.description ?? '').split('\n')[0].replace(/\|/g, '/').slice(0, 80)} |`);
+    }
+    fetched.push(...ranked.filter((c) => c.copyright_risk !== 'high').slice(0, Math.max(0, fetchN - fetched.length)));
+  }
+  for (const c of fetched) {
+    const dir = path.join(cfg.workDir, 'probe');
+    try {
+      const file = await downloadMedia(c, dir);
+      const p = await ffprobe(file);
+      say(`\nFETCH OK ${c.source_platform} ${c.source_url} -> ${p.width}x${p.height} ${p.duration.toFixed(1)}s ${(fs.statSync(file).size / 1e6).toFixed(1)} MB (${file})`);
+    } catch (e) {
+      say(`\nFETCH FAILED ${c.source_platform} ${c.source_url}: ${(e as Error).message.split('\n').slice(-3).join(' / ').slice(0, 400)}`);
+      process.exitCode = 2;
+    }
+  }
+  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `# Sourcing probe\n${lines.join('\n')}\n`);
+}
+
 /**
  * Viral-first: Reddit (transformation review) and YouTube (when enabled) before the stock-style fillers.
  * Everything without an explicit license is drafted with a review note; nothing is auto-classified as cleared.
@@ -200,9 +233,10 @@ async function discoverInto(cfg: Config, store: Store, sources: SourceAdapter[],
 function defaultSources(cfg: Config): string {
   if (cfg.sources) return cfg.sources;
   const s: string[] = [];
+  if (cfg.enableYoutubeTransform && cfg.transformationReview) s.push('youtube_viral');
   if (cfg.transformationReview) s.push(cfg.reddit.clientId ? 'reddit' : 'reddit_rss');
   if (cfg.transformationReview && cfg.tiktokAccounts.length) s.push('tiktok');
-  if (cfg.enableYoutubeTransform && cfg.transformationReview) s.push(cfg.youtubeKey ? 'youtube_trending' : 'youtube_search');
+  if (cfg.enableYoutubeTransform && cfg.transformationReview && cfg.youtubeKey) s.push('youtube_trending');
   if (cfg.youtubeKey && cfg.enableYoutubeCc) s.push('youtube');
   if (cfg.pixabayKey) s.push('pixabay');
   if (cfg.pexelsKey) s.push('pexels');
@@ -224,8 +258,9 @@ function doctor(cfg: Config) {
   const check = (name: string, ok: boolean, hint = '') => console.log(`${ok ? 'OK  ' : 'MISS'} ${name}${ok || !hint ? '' : `  -> ${hint}`}`);
   for (const tool of ['ffmpeg', 'ffprobe', 'python3', 'yt-dlp']) {
     const flag = tool.startsWith('ff') ? '-version' : '--version';
-    try { execFileSync(tool, [flag], { stdio: 'ignore' }); check(tool, true); } catch { check(tool, false, tool === 'yt-dlp' ? 'pip install yt-dlp (only for the opt-in YouTube CC source)' : 'install'); }
+    try { execFileSync(tool, [flag], { stdio: 'ignore' }); check(tool, true); } catch { check(tool, false, tool === 'yt-dlp' ? 'pip install "yt-dlp[default]" (YouTube / TikTok sources)' : 'install'); }
   }
+  try { execFileSync('python3', ['-c', 'import yt_dlp_ejs'], { stdio: 'ignore' }); check('yt-dlp JS challenge solver (yt-dlp-ejs)', true); } catch { check('yt-dlp JS challenge solver (yt-dlp-ejs)', false, 'pip install "yt-dlp[default]" – YouTube downloads 403 without it'); }
   check('LLM key', !!(cfg.openaiKey || cfg.anthropicKey), 'OPENAI_API_KEY or ANTHROPIC_API_KEY');
   check('ElevenLabs key', !!cfg.elevenKey, 'ELEVENLABS_API_KEY (voice-over disabled without it)');
   check('Buffer key', !!cfg.bufferKey, 'BUFFER_API_KEY from Buffer > Settings > API');
@@ -234,7 +269,7 @@ function doctor(cfg: Config) {
   check('YouTube CC source', !!cfg.youtubeKey && cfg.enableYoutubeCc, 'YOUTUBE_API_KEY + ENABLE_YOUTUBE_CC=true (read docs/SOURCES.md first)');
   check('Reddit app (viral source, transformation review)', !!cfg.reddit.clientId, 'optional: without it the public RSS feeds are used (no scores, rank proxy)');
   check('TikTok creator accounts (transformation review)', cfg.tiktokAccounts.length > 0, 'TIKTOK_ACCOUNTS=handle1,handle2 (original creators)');
-  check('YouTube (transformation review)', cfg.enableYoutubeTransform, 'ENABLE_YOUTUBE_TRANSFORM=true (+ YOUTUBE_API_KEY for the trending chart; YTDLP_COOKIES_B64 if downloads get bot-walled)');
+  check(`YouTube virals, no key needed (windows: ${cfg.youtubeViralWindows.join(',') || 'none'})`, cfg.enableYoutubeTransform, 'ENABLE_YOUTUBE_TRANSFORM=true (+ YOUTUBE_API_KEY for the most-popular chart; YTDLP_COOKIES_B64 if downloads get bot-walled)');
   check(`Transformation review ${cfg.transformationReview ? 'ON' : 'OFF'} (max risk ${cfg.maxCopyrightRisk})`, true);
   check('R2 credentials', !!(cfg.r2.accountId && cfg.r2.accessKeyId && cfg.r2.publicBaseUrl), 'R2_* vars; Buffer needs a public video URL');
   check('Control-plane API', !!(cfg.apiUrl && cfg.apiToken), 'TOASTER_API_URL/TOKEN (falls back to work/db.json)');

@@ -18,7 +18,7 @@ export const CONTENT_CATEGORIES: ContentCategory[] = [
 
 export type SourcePlatform = 'reddit' | 'youtube' | 'tiktok' | 'pexels' | 'pixabay' | 'internet_archive' | 'manual' | 'licensed_library';
 /** Discovery adapter names (a platform can have several adapters). */
-export type SourceAdapter = SourcePlatform | 'youtube_trending' | 'youtube_search' | 'reddit_rss';
+export type SourceAdapter = SourcePlatform | 'youtube_trending' | 'youtube_search' | 'youtube_viral' | 'reddit_rss';
 
 /**
  * Rights lifecycle.

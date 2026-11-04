@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg python3-pil && pip install -q yt-dlp
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg python3-pil && pip install -q "yt-dlp[default]"
       - run: npm ci && npm run build && npm run brand:generate
       - name: run-weekly (${{ inputs.reason || 'scheduled' }})
         env:
@@ -53,6 +53,8 @@ jobs:
           ENABLE_YOUTUBE_TRANSFORM: ${{ vars.ENABLE_YOUTUBE_TRANSFORM }}
           TIKTOK_ACCOUNTS: ${{ vars.TIKTOK_ACCOUNTS }}
           YTDLP_YOUTUBE_CLIENTS: ${{ vars.YTDLP_YOUTUBE_CLIENTS }}
+          YOUTUBE_VIRAL_WINDOWS: ${{ vars.YOUTUBE_VIRAL_WINDOWS }}
+          REDDIT_WINDOWS: ${{ vars.REDDIT_WINDOWS }}
           YTDLP_COOKIES_B64: ${{ secrets.YTDLP_COOKIES_B64 }}
           STICKERS: ${{ vars.STICKERS }}
           MUSIC_DEFAULT: ${{ vars.MUSIC_DEFAULT }}

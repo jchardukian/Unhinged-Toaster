@@ -13,7 +13,7 @@ another platform means the poster is probably not the creator: copyright_risk at
 Score each dimension 0-10 as integers:
 - entertainment: how funny/delightful is this likely to be
 - surprise: unexpected twist or payoff
-- clarity: works with no context within the first 3 seconds, in a vertical crop, muted or with sound
+- clarity: works with no context within the first 3 seconds, in a vertical crop, muted or with sound. The audience is English-speaking: a visual gag works in any language, but a clip whose joke is spoken or written in another language (transliterated Hindi/Urdu titles like "Papa ko remote todna pada", non-English dialogue in the transcript, burned-in captions in another script) scores clarity 0-2
 - brand_fit: fits a loud comedic mascot commenting on it; not political, not mean-spirited
 - rewatchability: loop/replay value
 Pick category from: ${CONTENT_CATEGORIES.join(', ')}.

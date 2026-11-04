@@ -44,8 +44,9 @@ What the pipeline does with it:
 - It does not auto-approve replacements or anything else.
 - It does not use background music unless it is listed in `assets/music/manifest.json` with a license.
 - It does not send outreach messages; `rights:outreach` only drafts them (optional, not the default strategy).
-- It does not download from YouTube unless the owner opts in (`ENABLE_YOUTUBE_TRANSFORM` / `ENABLE_YOUTUBE_CC`),
-  because third-party downloading conflicts with YouTube's Terms of Service even when the content license allows reuse.
+- YouTube virals are fetched with yt-dlp (`ENABLE_YOUTUBE_TRANSFORM`, on by default at the owner's request; set it to
+  `false` to switch the YouTube path off). Third-party downloading conflicts with YouTube's Terms of Service even when
+  the content license allows reuse; every such clip stays on the transformation-review path (see docs/SOURCES.md).
 
 ### Monetisation vs. authorisation
 YouTube's reused-content rules concern *monetisation eligibility* (meaningful transformation, commentary, original

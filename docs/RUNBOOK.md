@@ -14,7 +14,8 @@ See also **docs/DEPLOYMENT.md** for the minimum free-tier deployment and `script
 | pexels.com/api | free key | `PEXELS_API_KEY` (auto-cleared source) |
 | Google Cloud console | YouTube Data API v3 | `YOUTUBE_API_KEY` + `ENABLE_YOUTUBE_CC=true` (opt-in, see docs/SOURCES.md) |
 | reddit.com/prefs/apps | free "script" app | `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`, `REDDIT_PASSWORD` — **primary viral source** (transformation review) |
-| – | policy | `TRANSFORMATION_REVIEW=true`, `MAX_COPYRIGHT_RISK=medium`; optional `ENABLE_YOUTUBE_TRANSFORM=true` (YouTube trending, yt-dlp) |
+| – | policy | `TRANSFORMATION_REVIEW=true`, `MAX_COPYRIGHT_RISK=medium`; `ENABLE_YOUTUBE_TRANSFORM=true` (default: YouTube virals via yt-dlp, no key needed; `YOUTUBE_VIRAL_WINDOWS=today,week,month,alltime`, `REDDIT_WINDOWS=day,week`) |
+| GitHub → Actions → "Sourcing probe (dry run)" | – | run it once after deploying: prints what each source finds and fetches the top clip to prove the download path on the runner |
 | Buffer → Settings → Tags (optional) | tags "REVIEW" and "CLEARED" | `BUFFER_TAG_REVIEW_ID`, `BUFFER_TAG_CLEARED_ID` (`toaster buffer:tags` tries to list them) |
 | – | credits / voice | `CONTACT_EMAIL` (default theunhingedtoaster@gmail.com), `COMMENTARY_DEFAULT=auto` (LLM decides per clip: voice / text / none) |
 | Slack/Discord (optional) | incoming webhook | `ALERT_WEBHOOK_URL` |
