@@ -197,3 +197,14 @@ test('PG: profanity is masked in captions and silenced in the source audio; bran
   assert.equal(isCreatorHandle('gopro', 'instagram'), false);
   assert.equal(isCreatorHandle('someone', 'other'), false);  // device/app overlay, not a social watermark
 });
+
+test('produceUntil: 720p-class sources held in the first pass stay eligible, interrupted runs are recovered', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toaster-held-'));
+  const store = new JsonStore(path.join(dir, 'db.json'));
+  const base = { source_platform: 'reddit', source_url: 'https://www.reddit.com/r/funny/comments/a/x/', title: 't', rights_status: 'transformation_review', rights_basis: null, copyright_risk: 'low', final_score: 70, discovered_at: '', updated_at: '' } as Partial<Candidate>;
+  await store.upsertCandidates([{ ...base, id: 'A', source_id: 'a', status: 'producing' } as Candidate]);
+  const { produceUntil } = await import('../src/steps/produce.js');
+  // target 0: nothing is rendered, but the stale 'producing' row must come back as 'scored'
+  await produceUntil({ workDir: dir, transformationReview: true, maxCopyrightRisk: 'medium' } as never, store, 0);
+  assert.equal((await store.getCandidate('A'))!.status, 'scored');
+});

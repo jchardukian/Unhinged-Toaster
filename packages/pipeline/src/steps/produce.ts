@@ -56,7 +56,7 @@ export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate
       return null;
     }
     if (tier === 'ok' && opts.allowOkTier === false) {
-      await store.patchCandidate(c.id, { quality_tier: tier, width: probe.width, height: probe.height, status_reason: 'held: 720p-class, used only when 1080p stock runs out' });
+      await store.patchCandidate(c.id, { status: 'scored', quality_tier: tier, width: probe.width, height: probe.height, status_reason: 'held: 720p-class, used only when 1080p stock runs out' });
       log.info(`held ${c.id}: ${probe.width}x${probe.height} is 720p-class; preferring 1080p sources`);
       return null;
     }
@@ -176,6 +176,8 @@ export async function scoreAll(cfg: Config, store: Store, limit = 200): Promise<
 
 /** Produce until we have `target` productions not yet attached to a post. */
 export async function produceUntil(cfg: Config, store: Store, target: number): Promise<number> {
+  // a run that died mid-render (timeout, OOM) leaves candidates in 'producing'; they are good candidates, give them back
+  for (const stale of await store.listCandidates({ status: ['producing'] })) await store.patchCandidate(stale.id, { status: 'scored', status_reason: 'recovered from an interrupted run' });
   const unposted = await unpostedProductions(store);
   let have = unposted.length;
   if (have >= target) return have;
