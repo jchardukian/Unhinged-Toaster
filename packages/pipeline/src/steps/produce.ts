@@ -209,7 +209,10 @@ export async function unpostedProductions(store: Store) {
   const posts = await store.listPosts();
   const used = new Set(posts.filter((p) => p.state !== 'deleted').map((p) => p.production_id));
   const scores = new Map((await store.listCandidates()).map((c) => [c.id, c.final_score ?? 0]));
-  return prods.filter((p) => !used.has(p.id) && p.public_url)
+  // a candidate re-rendered by hand (`produce --id`) has several production rows: only its newest one is offered
+  const newestPerCandidate = new Map<string, Production>();
+  for (const p of prods) { const cur = newestPerCandidate.get(p.candidate_id); if (!cur || p.created_at > cur.created_at) newestPerCandidate.set(p.candidate_id, p); }
+  return prods.filter((p) => !used.has(p.id) && p.public_url && newestPerCandidate.get(p.candidate_id)?.id === p.id)
     .sort((a, b) => (scores.get(b.candidate_id) ?? 0) - (scores.get(a.candidate_id) ?? 0) || a.created_at.localeCompare(b.created_at));
 }
 

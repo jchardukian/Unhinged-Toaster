@@ -59,7 +59,9 @@ npm run toaster -- discover --sources youtube,reddit
 npm run toaster -- score
 npm run toaster -- rights:outreach --top 10
 npm run toaster -- rights:grant <id> --basis written_permission --evidence https://reddit.com/message/...
+npm run toaster -- fetch --limit 40     # download + probe scored candidates without rendering (download yield, resolution, audio, length)
 npm run toaster -- produce --count 3
+npm run toaster -- funnel               # measured funnel discovered -> scored -> eligible -> downloaded -> quality -> rendered, with API cost per video
 npm run toaster -- publish --dry-run
 npm run toaster -- sync
 npm run toaster -- report            # weekly readiness: 21 targets, funnel, shortages, blockers
