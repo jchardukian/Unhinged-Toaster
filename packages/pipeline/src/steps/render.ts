@@ -11,7 +11,7 @@ export interface Template {
   font: string;
   assets: Record<string, string>;
   handle: string;
-  headline: { style?: 'text' | 'box'; x: number; y: number; textTop?: number; coverTextTop?: number; boxWidth: number; coverBoxWidth?: number; coverY?: number; maxCharsPerLine: number; maxLines: number; fontSizes: number[]; fill: string; accentFill?: string; outline: string; outlineWidth: number; glow?: string; glowWidth?: number };
+  headline: { style?: 'text' | 'box'; x: number; y: number; textTop?: number; coverTextTop?: number; boxWidth: number; coverBoxWidth?: number; coverY?: number; maxCharsPerLine: number; maxLines: number; fontSizes: number[]; fill: string; accentFill?: string; outline: string; outlineWidth: number; glow?: string; glowWidth?: number; sideMargin?: number };
   clip: { maxWidth: number; maxHeight: number; coverIfTallerThan?: number; landscapeCenterY?: number; minTop?: number; frameWidth: number; shadowOffset: number };
   captions: { fontSize: number; bottomPadding: number; coverMarginV?: number; activeColor: string; idleColor: string; outlineColor: string };
   mascot: { width: number; coverWidth?: number; right: number; bottom: number; bobAmplitude: number; bobSpeed: number };
@@ -215,7 +215,12 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
       cur = nxt;
     });
   } else {
-    const fsz = t.headline.fontSizes[Math.min(lines.length, t.headline.fontSizes.length) - 1];
+    // shrink the font until the widest line (plus glow) fits inside the safe width; metrics come from the font itself
+    const glowW0 = t.headline.glowWidth ?? 22;
+    const safeW = W - 2 * (t.headline.sideMargin ?? 56) - 2 * glowW0;
+    let fsz = t.headline.fontSizes[Math.min(lines.length, t.headline.fontSizes.length) - 1];
+    const widest = Math.max(...lines.map((l) => measureText(font, l, 100)));
+    if (widest > 0) fsz = Math.min(fsz, Math.floor((safeW / widest) * 100));
     const lineH = Math.round(fsz * 1.0);
     const textTop = cover ? (t.headline.coverTextTop ?? 120) : (t.headline.textTop ?? 150);
     const glow = t.headline.glow ?? t.colors.red, glowW = t.headline.glowWidth ?? 22;
@@ -361,6 +366,19 @@ function punchIn(b: EditTimeline['beats'], offset: number, fps: number, cw: numb
 }
 
 const even = (n: number) => (n % 2 ? n - 1 : n);
+
+/** Text width in px at `size`, from a per-character advance table generated for the font (falls back to 0.55 em). */
+let metricsCache: { size: number; advance: Record<string, number>; default: number } | null | undefined;
+function measureText(fontFile: string, text: string, size: number): number {
+  if (metricsCache === undefined) {
+    const mf = fontFile.replace(/\.(ttf|otf)$/i, '-metrics.json');
+    metricsCache = fs.existsSync(mf) ? (JSON.parse(fs.readFileSync(mf, 'utf8')) as { size: number; advance: Record<string, number>; default: number }) : null;
+  }
+  if (!metricsCache) return text.length * 0.55 * size;
+  let w = 0;
+  for (const ch of text) w += metricsCache.advance[ch] ?? metricsCache.advance[ch.toUpperCase()] ?? metricsCache.default;
+  return (w / metricsCache.size) * size;
+}
 const esc = (p: string) => p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
 function fontFamilyName(file: string): string {
   const b = path.basename(file).replace(/\.(ttf|otf|woff2?)$/i, '');
