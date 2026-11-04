@@ -14,7 +14,7 @@
     "logo_fallback": "brand/generated/logo_placeholder.png"
   },
   "handle": "@theunhingedtoaster",
-  "headline": { "style": "text", "x": 40, "y": 70, "textTop": 150, "coverTextTop": 120, "boxWidth": 1000, "coverBoxWidth": 900, "coverY": 40, "maxCharsPerLine": 16, "maxLines": 3, "fontSizes": [112, 100, 86], "fill": "#FFFFFF", "accentFill": "#FFD100", "outline": "#111111", "outlineWidth": 9, "glow": "#E3191C", "glowWidth": 22, "sideMargin": 56 },
+  "headline": { "style": "text", "x": 40, "y": 70, "textTop": 150, "coverTextTop": 120, "boxWidth": 1000, "coverBoxWidth": 900, "coverY": 40, "maxCharsPerLine": 16, "maxLines": 3, "fontSizes": [112, 100, 88], "fill": "#FFFFFF", "accentFill": "#FFD100", "outline": "#111111", "outlineWidth": 7, "glow": "#E3191C", "glowWidth": 12, "sideMargin": 70, "scaleX": 84, "spacing": 1 },
   "clip": { "maxWidth": 1080, "maxHeight": 1920, "coverIfTallerThan": 1440, "landscapeCenterY": 900, "minTop": 440, "frameWidth": 10, "shadowOffset": 14 },
   "captions": { "fontSize": 74, "bottomPadding": 70, "coverMarginV": 470, "activeColor": "#FFD400", "idleColor": "#FFFFFF", "outlineColor": "#111111" },
   "mascot": { "width": 330, "coverWidth": 240, "right": 24, "bottom": 10, "bobAmplitude": 10, "bobSpeed": 3 },

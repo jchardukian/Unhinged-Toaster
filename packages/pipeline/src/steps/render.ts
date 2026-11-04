@@ -11,7 +11,7 @@ export interface Template {
   font: string;
   assets: Record<string, string>;
   handle: string;
-  headline: { style?: 'text' | 'box'; x: number; y: number; textTop?: number; coverTextTop?: number; boxWidth: number; coverBoxWidth?: number; coverY?: number; maxCharsPerLine: number; maxLines: number; fontSizes: number[]; fill: string; accentFill?: string; outline: string; outlineWidth: number; glow?: string; glowWidth?: number; sideMargin?: number };
+  headline: { style?: 'text' | 'box'; x: number; y: number; textTop?: number; coverTextTop?: number; boxWidth: number; coverBoxWidth?: number; coverY?: number; maxCharsPerLine: number; maxLines: number; fontSizes: number[]; fill: string; accentFill?: string; outline: string; outlineWidth: number; glow?: string; glowWidth?: number; sideMargin?: number; scaleX?: number; spacing?: number; assSizeFactor?: number };
   clip: { maxWidth: number; maxHeight: number; coverIfTallerThan?: number; landscapeCenterY?: number; minTop?: number; frameWidth: number; shadowOffset: number };
   captions: { fontSize: number; bottomPadding: number; coverMarginV?: number; activeColor: string; idleColor: string; outlineColor: string };
   mascot: { width: number; coverWidth?: number; right: number; bottom: number; bobAmplitude: number; bobSpeed: number };
@@ -215,24 +215,24 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
       cur = nxt;
     });
   } else {
-    // shrink the font until the widest line (plus glow) fits inside the safe width; metrics come from the font itself
-    const glowW0 = t.headline.glowWidth ?? 22;
-    const safeW = W - 2 * (t.headline.sideMargin ?? 56) - 2 * glowW0;
+    // libass headline: true outlines (no drawtext clipping), horizontal letter scaling for narrower, cleaner lettering,
+    // red glow layer under a black-outlined white/yellow layer. Font size shrinks until the widest line fits the safe width.
+    const glowW0 = t.headline.glowWidth ?? 14;
+    const scaleX = (t.headline.scaleX ?? 86) / 100;
+    const safeW = W - 2 * (t.headline.sideMargin ?? 70) - 2 * glowW0;
     let fsz = t.headline.fontSizes[Math.min(lines.length, t.headline.fontSizes.length) - 1];
-    const widest = Math.max(...lines.map((l) => measureText(font, l, 100)));
+    const widest = Math.max(...lines.map((l) => measureText(font, l, 100) * scaleX));
     if (widest > 0) fsz = Math.min(fsz, Math.floor((safeW / widest) * 100));
-    const lineH = Math.round(fsz * 1.0);
     const textTop = cover ? (t.headline.coverTextTop ?? 120) : (t.headline.textTop ?? 150);
-    const glow = t.headline.glow ?? t.colors.red, glowW = t.headline.glowWidth ?? 22;
-    lines.forEach((line, i) => {
-      const y = textTop + i * lineH;
-      const fill = i === lines.length - 1 && lines.length > 1 ? (t.headline.accentFill ?? t.headline.fill) : t.headline.fill; // last line in yellow like "TOASTER"
-      const common = `fontfile='${esc(font)}':text='${escapeDrawtext(line)}':fontsize=${fsz}:x=(w-text_w)/2:y=${y}`;
-      f.push(`[${cur}]drawtext=${common}:fontcolor=${glow}:borderw=${glowW}:bordercolor=${glow}[g${i}]`);              // red glow
-      f.push(`[g${i}]drawtext=${common}:fontcolor=${t.headline.outline}:borderw=${t.headline.outlineWidth + 4}:bordercolor=${t.headline.outline}[o${i}]`); // black outline
-      f.push(`[o${i}]drawtext=${common}:fontcolor=${fill}:borderw=2:bordercolor=${fill}[h${i}]`);                        // letter fill
-      cur = `h${i}`;
-    });
+    const headlineAss = path.join(job.workDir, 'headline.ass');
+    // ASS font size is a line height, not an em size: scale up so the lettering matches the em-based fit above
+    fs.writeFileSync(headlineAss, buildHeadlineAss(lines, {
+      fontName: fontFamilyName(font), fontSize: Math.round(fsz * (t.headline.assSizeFactor ?? 1.45)), scaleX: t.headline.scaleX ?? 86, spacing: t.headline.spacing ?? 1, top: textTop, playResX: W, playResY: H,
+      fill: t.headline.fill, accentFill: t.headline.accentFill ?? t.headline.fill, outline: t.headline.outline, outlineWidth: t.headline.outlineWidth,
+      glow: t.headline.glow ?? t.colors.red, glowWidth: glowW0, durationSec: total,
+    }));
+    f.push(`[${cur}]ass='${esc(headlineAss)}':fontsdir='${esc(fontsDir)}'[hl]`);
+    cur = 'hl';
   }
 
   // captions
@@ -366,6 +366,36 @@ function punchIn(b: EditTimeline['beats'], offset: number, fps: number, cw: numb
 }
 
 const even = (n: number) => (n % 2 ? n - 1 : n);
+
+/** Two-layer ASS headline: glow layer (fill + outline in the glow colour) under the lettering layer (fill + black outline). */
+function buildHeadlineAss(lines: string[], o: { fontName: string; fontSize: number; scaleX: number; spacing: number; top: number; playResX: number; playResY: number; fill: string; accentFill: string; outline: string; outlineWidth: number; glow: string; glowWidth: number; durationSec: number; lineHeight?: number }): string {
+  const end = Math.max(1, o.durationSec + 1);
+  const ts = (sec: number) => { const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60); return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.00`; };
+  const accent = assColor(o.accentFill);
+  // one positioned line per row (tight, predictable line height instead of libass's font-ascent spacing)
+  const lineH = Math.round(o.fontSize * (o.lineHeight ?? 0.72));
+  const rows = lines.map((l, i) => ({ y: o.top + i * lineH, text: l.replace(/[{}]/g, ''), accent: i === lines.length - 1 && lines.length > 1 }));
+  const events = rows.flatMap((r) => [
+    `Dialogue: 0,${ts(0)},${ts(end)},Glow,,0,0,0,,{\\an8\\pos(${o.playResX / 2},${r.y})}${r.text}`,
+    `Dialogue: 1,${ts(0)},${ts(end)},Head,,0,0,0,,{\\an8\\pos(${o.playResX / 2},${r.y})}${r.accent ? `{\\c${accent}}` : ''}${r.text}`,
+  ]).join('\n');
+  return `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${o.playResX}
+PlayResY: ${o.playResY}
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Glow,${o.fontName},${o.fontSize},${assColor(o.glow)},${assColor(o.glow)},${assColor(o.glow)},&H00000000,0,0,0,0,${o.scaleX},100,${o.spacing},0,1,${o.outlineWidth + o.glowWidth},0,8,40,40,${o.top},1
+Style: Head,${o.fontName},${o.fontSize},${assColor(o.fill)},${assColor(o.fill)},${assColor(o.outline)},&H00000000,0,0,0,0,${o.scaleX},100,${o.spacing},0,1,${o.outlineWidth},0,8,40,40,${o.top},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+${events}
+`;
+}
 
 /** Text width in px at `size`, from a per-character advance table generated for the font (falls back to 0.55 em). */
 let metricsCache: { size: number; advance: Record<string, number>; default: number } | null | undefined;
