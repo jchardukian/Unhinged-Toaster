@@ -4,6 +4,28 @@ Everything runs on: GitHub Actions (compute, free minutes), Cloudflare Workers +
 free tier), Buffer (existing Essentials account), OpenAI (pay-as-you-go, cents/week), ElevenLabs (existing account), Reddit
 (free script app). No paid licensing, no new paid services.
 
+## Launch checklist in plain language (about 30 minutes, once)
+
+You need a computer with Node.js 22, Git, the GitHub CLI (`gh auth login`) and a Cloudflare account (free).
+Nothing below costs money: Buffer, OpenAI (a few cents per week), ElevenLabs free tier, Cloudflare free tier, GitHub Actions.
+
+1. **Copy the settings file**: `cp .env.example .env`, open `.env` in any text editor.
+2. **Paste four keys** into `.env`: `BUFFER_API_KEY` (Buffer → Settings → API), `OPENAI_API_KEY` (platform.openai.com → API keys),
+   `ELEVENLABS_API_KEY` (elevenlabs.io → profile → API keys), and optionally `YOUTUBE_API_KEY` (Google Cloud console → YouTube Data API v3).
+   Never share `.env`; it is ignored by Git and is never uploaded anywhere except, by the next steps, into GitHub's and Cloudflare's secret stores.
+3. **Create the control plane**: `scripts/deploy-cloudflare.sh` (a browser window asks you to log in to Cloudflare once).
+   It creates the database and media bucket, writes `TOASTER_API_TOKEN` into `.env` (never printed) and prints the Worker URL:
+   put that URL into `.env` as `TOASTER_API_URL`.
+4. **Hand the keys to GitHub**: `scripts/setup-github-secrets.sh`. It reads `.env` and stores every key as a GitHub Actions secret
+   (encrypted, masked in logs). It prints the names of the keys it set, never their values.
+5. **Dress the channels**: paste `assets/brand/channel_description.txt` into YouTube Studio and the TikTok profile.
+6. **Dry run**: GitHub → Actions → "Weekly batch" → Run workflow with `dry_run=true`. Read the readiness and funnel reports in the run summary.
+7. **Real run**: the same workflow without dry run. Every Sunday: open Buffer, approve the drafts you like, delete the ones you do not.
+   Deleted drafts are replaced automatically on the next sync; nothing is ever published without your approval.
+
+What the scripts never do: commit secrets (`.env` is git-ignored and the repository contains no key files), print secret values, publish a post,
+or buy anything.
+
 ## Credentials: what can be wired automatically vs. what needs the owner
 
 | Item | Needed for | Can be configured through an existing integration? | Owner action |
