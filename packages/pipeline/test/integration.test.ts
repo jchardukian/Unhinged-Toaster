@@ -115,6 +115,22 @@ test('full mocked approval-to-scheduling workflow', async () => {
   const tt = posts.find((p) => p.slot_at === firstSlot && p.service === 'tiktok')!;
   assert.equal(yt.production_id, tt.production_id);
   assert.equal(fake.posts.get(yt.buffer_post_id!)!.dueAt, firstSlot, 'draft carries the intended publishing date');
+  // every one of the 21 planned slots has exactly one YouTube and one TikTok draft of the same production, at that slot's instant
+  const live = posts.filter((p) => p.state === 'draft');
+  assert.equal(live.length, 42);
+  const planned = new Set(plan.slots.filter((x) => x.service === 'youtube').map((x) => x.slot_at));
+  assert.equal(planned.size, 21);
+  for (const slot of planned) {
+    const pair = live.filter((p) => p.slot_at === slot);
+    assert.deepEqual(pair.map((p) => p.service).sort(), ['tiktok', 'youtube'], `slot ${slot} has one draft per service`);
+    assert.equal(pair[0].production_id, pair[1].production_id, 'both services carry the same Short');
+    for (const p of pair) assert.equal(fake.posts.get(p.buffer_post_id!)!.dueAt, slot, 'Buffer dueAt equals the planned slot');
+  }
+  assert.equal(new Set(live.map((p) => p.buffer_post_id)).size, 42, 'no two rows share a Buffer post');
+  for (const fp of fake.posts.values()) {
+    assert.match(fp.text, /theunhingedtoaster@gmail\.com/, 'every public description carries the contact address');
+    assert.doesNotMatch(fp.text, /review|copyright risk|fair use/i, 'no internal review wording reaches Buffer');
+  }
 
   // 2. idempotent re-run: nothing new is created
   r = await publishWeek(cfg, store, { client, now, weeks: ['next'] });
