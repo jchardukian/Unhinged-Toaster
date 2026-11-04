@@ -13,7 +13,7 @@ export async function chatJson<T>(cfg: Config, system: string, user: string, opt
 
 async function openai(cfg: Config, system: string, user: string, opts: ChatOpts): Promise<string> {
   const content: unknown = opts.imageJpegBase64
-    ? [{ type: 'text', text: user }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${opts.imageJpegBase64}`, detail: 'low' } }]
+    ? [{ type: 'text', text: user }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${opts.imageJpegBase64}`, detail: 'high' } }]
     : user;
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',

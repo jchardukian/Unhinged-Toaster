@@ -28,6 +28,7 @@ export function repoRoot(): string {
 export interface Config {
   llmProvider: 'openai' | 'anthropic';
   llmModel: string;
+  visionOcrModel: string;
   openaiKey: string | undefined;
   anthropicKey: string | undefined;
   transcribeModel: string;
@@ -75,6 +76,7 @@ export function loadConfig(): Config {
   return {
     llmProvider: (e.LLM_PROVIDER as 'openai' | 'anthropic') ?? (e.ANTHROPIC_API_KEY && !e.OPENAI_API_KEY ? 'anthropic' : 'openai'),
     llmModel: e.LLM_MODEL ?? (e.LLM_PROVIDER === 'anthropic' ? 'claude-haiku-5-5' : 'gpt-4o-mini'),
+    visionOcrModel: e.VISION_OCR_MODEL ?? (e.LLM_PROVIDER === 'anthropic' ? 'claude-sonnet-5-5' : 'gpt-4o'),
     openaiKey: e.OPENAI_API_KEY,
     anthropicKey: e.ANTHROPIC_API_KEY,
     transcribeModel: e.TRANSCRIBE_MODEL ?? 'whisper-1',

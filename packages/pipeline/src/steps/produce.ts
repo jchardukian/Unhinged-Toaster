@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
 import { analyzeClip } from './analyze.js';
-import { contactSheet, sheetBase64, sheetPathFor } from './frames.js';
+import { contactSheet, readWatermark, sheetBase64, sheetPathFor } from './frames.js';
 import { log, type Config } from '../config.js';
 import type { Store } from '../store.js';
 import { transcribe } from './captions.js';
@@ -79,7 +79,12 @@ export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate
       }
       c = { ...c, llm_score: rescored.llm_score, final_score: rescored.final_score, llm_rationale: rescored.llm_rationale, safety_flags: rescored.safety_flags, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null };
       await store.patchCandidate(c.id, { llm_score: c.llm_score, final_score: c.final_score, llm_rationale: c.llm_rationale, safety_flags: c.safety_flags, copyright_risk: c.copyright_risk, copyright_risk_reasons: c.copyright_risk_reasons, detected_handle: c.detected_handle, detected_platform: c.detected_platform, visual_summary: c.visual_summary });
+      // the scorer only flags that a watermark exists; the exact handle comes from the two-frame reader (or stays null)
+      const wm = await readWatermark(cfg, src, dir);
+      c = { ...c, detected_handle: wm?.handle ?? null, detected_platform: wm?.platform ?? c.detected_platform ?? null };
+      await store.patchCandidate(c.id, { detected_handle: c.detected_handle, detected_platform: c.detected_platform });
       if (c.detected_handle) log.info(`vision: footage credits @${c.detected_handle}${c.detected_platform ? ` (${c.detected_platform})` : ''}; crediting them`);
+      else if (c.detected_platform) log.info(`vision: ${c.detected_platform} watermark seen but handle not readable with confidence; not credited by name`);
     }
 
     // copy + edit direction

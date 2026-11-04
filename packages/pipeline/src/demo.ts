@@ -7,7 +7,7 @@ import { loadTemplate, pickMusic, renderShort } from './steps/render.js';
 import { synthesiseCommentary } from './steps/tts.js';
 import { writeCopy } from './steps/copy.js';
 import { analyzeClip } from './steps/analyze.js';
-import { contactSheet, sheetBase64, sheetPathFor } from './steps/frames.js';
+import { contactSheet, readWatermark, sheetBase64, sheetPathFor } from './steps/frames.js';
 import { scoreCandidate } from './steps/score.js';
 import { defaultCategoryWeights } from '@toaster/shared';
 import { planEdit, qualityTier, type Candidate } from '@toaster/shared';
@@ -59,7 +59,9 @@ export async function runDemo(cfg: Config, flags: Record<string, string | boolea
     if (frames) {
       const scored = await scoreCandidate(cfg, cand, defaultCategoryWeights(new Date().toISOString()), transcript?.text, frames);
       log.info(`vision: score ${scored.final_score} risk ${scored.copyright_risk} handle ${scored.detected_handle ?? '-'} (${scored.detected_platform ?? '-'}) | ${scored.visual_summary ?? ''}`);
-      Object.assign(cand, { visual_summary: scored.visual_summary ?? null, detected_handle: scored.detected_handle ?? null, detected_platform: scored.detected_platform ?? null, copyright_risk: scored.copyright_risk ?? null });
+      const wm = await readWatermark(cfg, clip, dir);
+      log.info(`watermark reader: ${wm ? `@${wm.handle} (${wm.platform})` : 'none / not confident'}`);
+      Object.assign(cand, { visual_summary: scored.visual_summary ?? null, detected_handle: wm?.handle ?? null, detected_platform: wm?.platform ?? scored.detected_platform ?? null, copyright_risk: scored.copyright_risk ?? null });
     }
   }
   const copy = offline
