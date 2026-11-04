@@ -28,6 +28,21 @@ export async function transcribe(cfg: Config, audioFile: string): Promise<Transc
   return { text: j.text.trim(), words };
 }
 
+/** PG channel: swear words are masked in captions (f**k) and muted in the source audio for the word's duration. */
+const PROFANITY = /\b(f+u+c*k+\w*|s+h+i+t+\w*|b+i+t+c+h+\w*|a+s+s+h+o+l+e+\w*|d+i+c+k+\w*|c+u+n+t+\w*|m+o+t+h+e+r+f+\w*|n+i+g+g+\w*|f+a+g+g*\w*|r+e+t+a+r+d+\w*)\b/i;
+
+export function isProfane(word: string): boolean { return PROFANITY.test(word.replace(/[^A-Za-z]/g, '')); }
+
+export function maskProfanity(word: string): string {
+  if (!isProfane(word)) return word;
+  return word.replace(/[A-Za-z]+/g, (m) => (m.length <= 2 ? '*'.repeat(m.length) : m[0] + '*'.repeat(m.length - 2) + m[m.length - 1]));
+}
+
+/** Source-time windows (seconds) to silence: every profane word, padded slightly. */
+export function muteWindows(words: Word[], pad = 0.05): { from: number; to: number }[] {
+  return words.filter((w) => isProfane(w.word)).map((w) => ({ from: Math.max(0, w.start - pad), to: w.end + pad }));
+}
+
 /**
  * Whisper invents text on music / noise / silence ("Thanks for watching!", repeated syllables, foreign-script loops).
  * Captions must never show that, so such transcripts are dropped (the short then simply has no captions).

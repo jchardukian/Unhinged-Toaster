@@ -5,7 +5,7 @@ import { log, type Config } from '../config.js';
 import type { Store } from '../store.js';
 import { costOf, readUsageLog, sumUsage } from '../usage.js';
 import { downloadMedia, ffprobe } from './media.js';
-import { rightsPolicy } from './produce.js';
+import { maxSourceSec, rightsPolicy } from './produce.js';
 import { withRetry } from '../retry.js';
 
 /**
@@ -32,6 +32,7 @@ export async function fetchProbe(cfg: Config, store: Store, limit: number): Prom
       const reason = `fetch: ${p.width}x${p.height} ${tier}, ${p.hasAudio ? 'audio' : 'NO AUDIO'}, ${p.duration.toFixed(1)}s, ${mb.toFixed(1)} MB`;
       const patch: Partial<Candidate> = { width: p.width, height: p.height, duration_sec: p.duration, quality_tier: tier, status_reason: reason };
       if (tier === 'low' && !cfg.allowLowQuality) patch.status = 'rejected_quality';
+      else if (p.duration > maxSourceSec(cfg)) { patch.status = 'rejected_quality'; patch.status_reason = `too long for a Short (${p.duration.toFixed(0)}s > ${maxSourceSec(cfg)}s; no auto-trim)`; }
       else if (!p.hasAudio) { patch.status = 'failed'; patch.status_reason = `fetch: no audio track (${p.width}x${p.height})`; }
       await store.patchCandidate(c.id, patch);
       log.info(`${c.id} ${reason}${patch.status ? ` -> ${patch.status}` : ''}`);

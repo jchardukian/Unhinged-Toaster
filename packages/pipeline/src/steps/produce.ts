@@ -24,6 +24,9 @@ export function rightsPolicy(cfg: Config): RightsPolicy {
   return { transformationReview: cfg.transformationReview, maxCopyrightRisk: cfg.maxCopyrightRisk };
 }
 
+/** Longest source we turn into a Short: the template limit plus a few seconds the edit plan can absorb. */
+export function maxSourceSec(cfg: Config): number { return loadTemplate(cfg).limits.maxDurationSec + 6; }
+
 export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate, opts: { allowOkTier?: boolean } = {}): Promise<Production | null> {
   let c = cIn;
   const dir = path.join(cfg.workDir, 'jobs', c.id);
@@ -40,6 +43,12 @@ export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate
     const src = await withRetry(`download ${c.id}`, () => downloadMedia(c, dir), { attempts: 3, baseMs: 3000 });
     const probe = await ffprobe(src);
     if (probe.duration < 3) throw new Error(`clip too short (${probe.duration.toFixed(1)}s)`);
+    if (probe.duration > maxSourceSec(cfg)) {
+      // No automatic sub-clipping: cutting a 2-minute clip at 59 s loses the payoff. Reddit feeds carry no duration, so this is where it shows up.
+      await store.patchCandidate(c.id, { status: 'rejected_quality', duration_sec: probe.duration, width: probe.width, height: probe.height, status_reason: `too long for a Short (${probe.duration.toFixed(0)}s > ${maxSourceSec(cfg)}s; no auto-trim)` });
+      log.info(`rejected ${c.id}: ${probe.duration.toFixed(0)}s is longer than a Short`);
+      return null;
+    }
     const tier = qualityTier(probe.width, probe.height);
     if (tier === 'low' && !cfg.allowLowQuality) {
       await store.patchCandidate(c.id, { status: 'rejected_quality', quality_tier: tier, width: probe.width, height: probe.height, status_reason: `source ${probe.width}x${probe.height} below 720p-class` });

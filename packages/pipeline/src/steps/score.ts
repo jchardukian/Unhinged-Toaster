@@ -27,6 +27,11 @@ Also assess copyright_risk for reusing this footage in a transformed commentary 
 - "low": clearly self-filmed amateur phone footage posted by the person who filmed it, no commercial music
 copyright_risk_reasons: array of short strings.`;
 
+/** True when the source gave real engagement numbers (views or comments or shares), not just a rank proxy. */
+export function statsKnown(c: Pick<Candidate, 'views' | 'comments' | 'shares'>): boolean {
+  return c.views != null || c.comments != null || c.shares != null;
+}
+
 export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: CategoryWeight[], transcript?: string | null, framesJpegBase64?: string): Promise<Candidate> {
   let c = cIn;
   const h = heuristicScore(c);
@@ -61,7 +66,10 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
   }
   const { score, blocked, reason } = llmScore(llm);
   const category = CONTENT_CATEGORIES.includes(llm.category) ? llm.category : c.category;
-  const f = finalScore(h, score, category, weights);
+  // Without real engagement stats (Reddit feeds carry none: the "likes" field is a rank proxy) the heuristic is noise
+  // that sat at ~50 and pulled every blend to the threshold (10% pass in the first 287-candidate run), so the LLM
+  // rubric alone decides; the vision pass in produce re-scores with frames before anything is rendered.
+  const f = statsKnown(c) ? finalScore(h, score, category, weights) : finalScore(score, score, category, weights);
   let status: Candidate['status'] = 'scored';
   let status_reason: string | null = null;
   if (blocked) { status = 'rejected_safety'; status_reason = reason ?? 'safety'; }

@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildAss, assColor, isHallucination } from '../src/steps/captions.js';
+import { buildAss, assColor, isHallucination, maskProfanity, muteWindows } from '../src/steps/captions.js';
+import { isCreatorHandle } from '../src/steps/frames.js';
 import { validate, fallback } from '../src/steps/copy.js';
 import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHour, youtubeFetchGuard, ytMetaFromApi, ytViralBucket } from '../src/steps/discover.js';
 import { ytdlpCommonArgs } from '../src/steps/media.js';
 import { postText } from '../src/steps/publish.js';
+import { statsKnown } from '../src/steps/score.js';
 import { JsonStore } from '../src/store.js';
 import { parseJson } from '../src/llm.js';
 import type { Candidate, Production } from '@toaster/shared';
@@ -176,4 +178,22 @@ test('youtube viral: Data API items map onto the yt-dlp field names; GitHub runn
   assert.equal(youtubeFetchGuard({ ytdlpCookiesB64: 'abc' }, { GITHUB_ACTIONS: 'true' }).blocked, false);
   assert.equal(youtubeFetchGuard({ ytdlpCookiesB64: undefined }, { GITHUB_ACTIONS: 'true', YTDLP_ASSUME_FETCHABLE: 'true' }).blocked, false);
   assert.equal(youtubeFetchGuard({ ytdlpCookiesB64: undefined }, {}).blocked, false);
+});
+
+test('scoring: feeds without real stats are judged by the LLM rubric alone', () => {
+  assert.equal(statsKnown({ views: null, comments: null, shares: null }), false);  // Reddit RSS (rank proxy in likes)
+  assert.equal(statsKnown({ views: 1200, comments: null, shares: null }), true);
+  assert.equal(statsKnown({ views: null, comments: 3, shares: null }), true);
+});
+
+test('PG: profanity is masked in captions and silenced in the source audio; brand watermarks are never credited', () => {
+  assert.equal(maskProfanity('fucked'), 'f****d');
+  assert.equal(maskProfanity('Shit!'), 'S**t!');
+  assert.equal(maskProfanity('assistant'), 'assistant');   // no false positives on substrings
+  assert.equal(maskProfanity('dog'), 'dog');
+  assert.deepEqual(muteWindows([{ word: 'he', start: 1, end: 1.2 }, { word: 'fucked', start: 1.3, end: 1.7 }]), [{ from: 1.25, to: 1.75 }]);
+  assert.equal(isCreatorHandle('blink', 'other'), false);
+  assert.equal(isCreatorHandle('great_dane_whispers', 'instagram'), true);
+  assert.equal(isCreatorHandle('gopro', 'instagram'), false);
+  assert.equal(isCreatorHandle('someone', 'other'), false);  // device/app overlay, not a social watermark
 });

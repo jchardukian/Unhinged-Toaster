@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { escapeDrawtext, planEdit, wrapText, type CommentaryMode, type EditTimeline } from '@toaster/shared';
 import { log, type Config } from '../config.js';
-import { assColor, buildAss, type Word } from './captions.js';
+import { assColor, buildAss, maskProfanity, muteWindows, type Word } from './captions.js';
 import { ffprobe, mediaDuration, run } from './media.js';
 
 export interface Template {
@@ -144,7 +144,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   // ---------- captions file (source time -> edited time; drop words inside the replay since it is a repeat)
   let assFile: string | null = null;
   if (job.words && job.words.length) {
-    const words = job.words.filter((w) => w.start < D).map((w) => ({ ...w, start: tl.map(w.start), end: tl.map(Math.min(w.end, D)) }));
+    const words = job.words.filter((w) => w.start < D).map((w) => ({ ...w, word: maskProfanity(w.word), start: tl.map(w.start), end: tl.map(Math.min(w.end, D)) }));
     assFile = path.join(job.workDir, 'captions.ass');
     fs.writeFileSync(assFile, buildAss(words, {
       fontName: fontFamilyName(font), fontSize: t.captions.fontSize, playResX: W, playResY: H,
@@ -285,7 +285,9 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   // ---------- audio graph (mirrors the edit: freeze = silence, replay = slowed original, outro = padding)
   const aParts: string[] = [];
   const mixIn: string[] = [];
-  if (probe.hasAudio && !b.muteSource) aParts.push(`[${iClip}:a]aresample=48000,atrim=0:${D.toFixed(3)},asetpts=PTS-STARTPTS[a0]`);
+  // swear words are silenced in the source audio (captions show them masked); windows are in source time, before any edit
+  const mutes = (job.words ? muteWindows(job.words) : []).filter((m) => m.from < D).map((m) => `,volume=0:enable='between(t,${m.from.toFixed(3)},${Math.min(m.to, D).toFixed(3)})'`).join('');
+  if (probe.hasAudio && !b.muteSource) aParts.push(`[${iClip}:a]aresample=48000,atrim=0:${D.toFixed(3)},asetpts=PTS-STARTPTS${mutes}[a0]`);
   else aParts.push(`anullsrc=r=48000:cl=stereo,atrim=0:${D.toFixed(3)},asetpts=PTS-STARTPTS[a0]`);
   const asplits = ['aB'];
   if (b.freeze) asplits.unshift('aA');

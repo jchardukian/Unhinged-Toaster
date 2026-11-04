@@ -248,7 +248,7 @@ export async function discoverRedditRss(cfg: Config, limit: number, windows: ('d
           const r = await fetch(`https://www.reddit.com/r/${sub}/top/.rss?t=${window}&limit=${Math.min(100, limit)}`, { headers: { 'user-agent': ua, accept: 'application/atom+xml,application/xml' } });
           if (r.status === 429 || r.status >= 500) throw new Error(`reddit rss ${r.status}`);
           return r;
-        }, { attempts: 3, baseMs: 2500 });
+        }, { attempts: 3, baseMs: 15000 });
         if (!res.ok) { log.warn(`reddit rss r/${sub} -> ${res.status}`); continue; }
         xml = await res.text();
       } catch (e) { log.warn(`reddit rss r/${sub} failed: ${(e as Error).message}`); continue; }

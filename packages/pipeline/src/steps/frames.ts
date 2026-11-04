@@ -47,6 +47,19 @@ export async function readWatermark(cfg: Config, video: string, dir: string): Pr
     } catch { reads.push({ handle: null, platform: null }); }
   }
   const [a, b] = reads;
-  if (a.handle && b.handle && a.handle === b.handle) return { handle: a.handle, platform: a.platform ?? b.platform ?? null };
+  if (a.handle && b.handle && a.handle === b.handle) {
+    const platform = a.platform ?? b.platform ?? null;
+    if (!isCreatorHandle(a.handle, platform)) return null;
+    return { handle: a.handle, platform };
+  }
   return null;
+}
+
+/** Camera / app / platform brands printed in footage are not creators: never credit them. Pure, for tests. */
+const BRAND_WATERMARKS = new Set(['blink', 'ring', 'nest', 'arlo', 'wyze', 'eufy', 'gopro', 'dji', 'insta360', 'hikvision', 'reolink', 'lorex', 'tiktok', 'capcut', 'instagram', 'reels', 'youtube', 'shorts', 'snapchat', 'facebook', 'twitter', 'x', 'kick', 'twitch', 'vsco', 'viralhog', 'jukin', 'storyful', 'newsflare', 'collab', 'ladbible', 'unilad', 'dailymail', 'espn', 'nfl', 'nba', 'mlb', 'nhl', 'fifa']);
+export function isCreatorHandle(handle: string, platform: string | null): boolean {
+  const h = handle.toLowerCase().replace(/^@/, '');
+  if (BRAND_WATERMARKS.has(h) || BRAND_WATERMARKS.has(h.replace(/[._\d]+$/, ''))) return false;
+  // a handle only counts as a creator credit when it comes from a social platform's watermark (not a device/app overlay)
+  return ['instagram', 'tiktok', 'youtube', 'snapchat', 'facebook', 'twitter'].includes(platform ?? '');
 }
