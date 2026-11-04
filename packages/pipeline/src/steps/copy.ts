@@ -7,7 +7,7 @@ Voice: loud, deadpan-furious, comic-book energy, wholesome underneath. PG. No sl
 Output JSON:
 {
  "headline": string,     // 3-8 words, ALL CAPS energy not required, max 60 characters, no hashtags, no emojis, no quotes
- "commentary": string,   // exactly ONE sentence the toaster yells about THIS clip, max 110 characters, must reference something specific in the clip
+ "commentary": string,   // exactly ONE short punchy sentence the toaster yells about THIS clip, max 85 characters, must reference something specific in the clip
  "caption": string,      // 1-2 sentence post description, max 180 chars, no hashtags
  "hashtags": string[],   // 5-7 tags without '#', mix of broad (funny, fails, shorts) and specific
  "sticker": string,      // 1-3 word comic reaction that pops on screen at the peak moment, e.g. "NOPE.", "WHY.", "OH NO.", "BONK."
@@ -37,7 +37,7 @@ export async function writeCopy(cfg: Config, c: Candidate, transcript?: string |
 export function validate(r: CopyResult): CopyResult | null {
   if (!r || typeof r.headline !== 'string' || typeof r.commentary !== 'string') return null;
   const headline = r.headline.replace(/["“”#]/g, '').replace(/\s+/g, ' ').trim();
-  const commentary = clampSentence(r.commentary.replace(/["“”]/g, ''), 110);
+  const commentary = clampSentence(r.commentary.replace(/["“”]/g, ''), 100);
   if (headline.length < 3 || headline.length > 60) return null;
   if (!/[a-z]/i.test(commentary)) return null;
   // single sentence: at most one terminal punctuation run
