@@ -32,9 +32,10 @@ test('assColor converts RGB hex to ASS BGR', () => {
   assert.equal(assColor('#111111', 0x80), '&H80111111');
 });
 
-test('copy validation enforces limits and falls back', () => {
-  assert.equal(validate({ headline: 'x'.repeat(61), commentary: 'ok.', caption: '', hashtags: [] }), null);
-  assert.equal(validate({ headline: 'Fine', commentary: 'Two. Sentences.', caption: '', hashtags: [] }), null);
+test('copy validation repairs limits, rejects empty/slur copy, and the fallback stays within limits', () => {
+  assert.equal(validate({ headline: 'x'.repeat(61), commentary: 'ok.', caption: '', hashtags: [] })!.headline.length <= 60, true);
+  assert.equal(validate({ headline: 'Fine', commentary: 'Two sentences here. Second one.', caption: '', hashtags: [] })!.commentary, 'Two sentences here.');
+  assert.equal(validate({ headline: 'Fine', commentary: '', caption: '', hashtags: [] }), null);
   const ok = validate({ headline: '"Wait" for it', commentary: 'This dog just robbed a pizzeria and I respect it!', caption: 'c', hashtags: ['#Funny', 'dogs'] });
   assert.equal(ok?.headline, 'Wait for it');
   assert.deepEqual(ok?.hashtags, ['Funny', 'dogs']);
@@ -207,4 +208,11 @@ test('produceUntil: 720p-class sources held in the first pass stay eligible, int
   // target 0: nothing is rendered, but the stale 'producing' row must come back as 'scored'
   await produceUntil({ workDir: dir, transformationReview: true, maxCopyrightRisk: 'medium' } as never, store, 0);
   assert.equal((await store.getCandidate('A'))!.status, 'scored');
+});
+
+test('copy validate repairs length and sentence count instead of falling back to generic copy', () => {
+  const r = validate({ headline: 'THIS HEADLINE IS WAY TOO LONG FOR THE TOP OF A SHORT AND KEEPS GOING ON', commentary: 'That cat just launched itself into the toy like a stunt double. Then it looked at me. Twice!', caption: 'c', hashtags: ['funny'] } as never)!;
+  assert.ok(r.headline.length <= 60 && !/\s$/.test(r.headline));
+  assert.equal(r.commentary, 'That cat just launched itself into the toy like a stunt double.');
+  assert.equal(validate({ headline: 'X', commentary: '', caption: '', hashtags: [] } as never), null);
 });

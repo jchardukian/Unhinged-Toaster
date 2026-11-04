@@ -24,8 +24,8 @@ export async function writeCopy(cfg: Config, c: Candidate, transcript?: string |
     }), { temperature: 0.9, maxTokens: 400, imageJpegBase64: framesJpegBase64 });
     const out = validate(r);
     if (out) return out;
-    log.warn(`copy failed validation for ${c.id}, retrying once`);
-    const r2 = await chatJson<CopyResult>(cfg, SYSTEM + '\nYour previous attempt violated the limits. Be shorter.', JSON.stringify({ original_title: c.title, category: c.category }), { temperature: 0.6, maxTokens: 300 });
+    log.warn(`copy failed validation for ${c.id} (empty or slur), retrying once with the clip context`);
+    const r2 = await chatJson<CopyResult>(cfg, SYSTEM + '\nYour previous attempt was rejected (empty or offensive). Keep it clean and specific to the clip.', JSON.stringify({ original_title: c.title, visual_summary: c.visual_summary ?? null, category: c.category, transcript: transcript?.slice(0, 400) ?? null }), { temperature: 0.6, maxTokens: 350, imageJpegBase64: framesJpegBase64 });
     const out2 = validate(r2);
     if (out2) return out2;
   } catch (e) {
@@ -34,14 +34,20 @@ export async function writeCopy(cfg: Config, c: Candidate, transcript?: string |
   return fallback(c);
 }
 
+/**
+ * Normalise the LLM copy. Length and sentence-count problems are REPAIRED (first sentence, word-boundary cut) rather than
+ * rejected: a rejected copy used to fall through to the generic per-category fallback, which produced a Short whose
+ * commentary had nothing to do with the clip (1 of 21 in the production test). Only empty text and slurs still reject.
+ */
 export function validate(r: CopyResult): CopyResult | null {
   if (!r || typeof r.headline !== 'string' || typeof r.commentary !== 'string') return null;
-  const headline = r.headline.replace(/["“”#]/g, '').replace(/\s+/g, ' ').trim();
-  const commentary = clampSentence(r.commentary.replace(/["“”]/g, ''), 100);
-  if (headline.length < 3 || headline.length > 60) return null;
-  if (!/[a-z]/i.test(commentary)) return null;
-  // single sentence: at most one terminal punctuation run
-  if ((commentary.match(/[.!?]+/g) ?? []).length > 1) return null;
+  let headline = r.headline.replace(/["“”#]/g, '').replace(/\s+/g, ' ').trim();
+  if (headline.length > 60) headline = headline.slice(0, 60).replace(/\s+\S*$/, '').replace(/[,:;\-–—]+$/, '').trim();
+  let commentary = r.commentary.replace(/["“”]/g, '').replace(/\s+/g, ' ').trim();
+  const firstSentence = commentary.match(/^.*?[.!?]+(?=\s|$)/)?.[0];
+  if (firstSentence && firstSentence.length >= 12 && (commentary.match(/[.!?]+/g) ?? []).length > 1) commentary = firstSentence.trim();
+  commentary = clampSentence(commentary, 100);
+  if (headline.length < 3 || !/[a-z]/i.test(commentary)) return null;
   if (containsSlur(headline) || containsSlur(commentary) || containsSlur(r.caption ?? '')) return null;
   const sticker = cleanShort(r.sticker, 14);
   const freeze = cleanShort(r.freeze_text, 22);

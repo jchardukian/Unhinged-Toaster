@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildReadinessReport, formatReadinessMarkdown } from '../src/report.js';
-import { ccProvenanceRisk } from '../src/provenance.js';
+import { broadcastRisk, ccProvenanceRisk } from '../src/provenance.js';
 import { buildWeekPlan } from '../src/schedule.js';
 import { initialRights } from '../src/rights.js';
 import type { Candidate, Production, ScheduledPost } from '../src/types.js';
@@ -61,4 +61,11 @@ test('provenance: CC label alone does not clear compilation-style uploads', () =
   assert.equal(initialRights('youtube', { license: 'creativeCommon', provenanceRisk: 'low' }).rights_status, 'cleared');
   assert.equal(initialRights('internet_archive', { license: 'http://creativecommons.org/publicdomain/zero/1.0/' }).rights_basis, 'cc0');
   assert.equal(initialRights('internet_archive', { license: 'http://creativecommons.org/licenses/by-nc/3.0/' }).rights_status, 'unknown');
+});
+
+test('broadcast / pro-sports / TV footage is flagged high risk by keyword backstop', () => {
+  assert.equal(broadcastRisk('Sir Patrick Stewart drank champagne out of F1 driver Daniel Ricciardo\'s boot on the podium').high, true);
+  assert.equal(broadcastRisk('Argentinian reporter pauses live broadcast to save a dog').high, true);
+  assert.equal(broadcastRisk('Tiny kitten decided this giant leaf was the ultimate hiding spot').high, false);
+  assert.equal(broadcastRisk('Down 30-25 with 3.8 seconds to go. Whitesboro with the win').high, false); // fan-filmed high-school game stays eligible
 });

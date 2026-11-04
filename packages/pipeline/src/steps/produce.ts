@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
+import { broadcastRisk, creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
 import { analyzeClip } from './analyze.js';
 import { contactSheet, readWatermark, sheetBase64, sheetPathFor } from './frames.js';
 import { log, type Config } from '../config.js';
@@ -89,6 +89,13 @@ export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate
       }
       c = { ...c, llm_score: rescored.llm_score, final_score: rescored.final_score, llm_rationale: rescored.llm_rationale, safety_flags: rescored.safety_flags, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null };
       await store.patchCandidate(c.id, { llm_score: c.llm_score, final_score: c.final_score, llm_rationale: c.llm_rationale, safety_flags: c.safety_flags, copyright_risk: c.copyright_risk, copyright_risk_reasons: c.copyright_risk_reasons, detected_handle: c.detected_handle, detected_platform: c.detected_platform, visual_summary: c.visual_summary });
+      // hard backstop: broadcast / pro-sports / TV footage seen by the vision pass or heard in the transcript is never produced
+      const b = broadcastRisk(`${c.title}\n${c.description ?? ''}\n${c.visual_summary ?? ''}\n${transcript?.text.slice(0, 400) ?? ''}`);
+      if (b.high && c.rights_status !== 'cleared') {
+        await store.patchCandidate(c.id, { status: 'blocked_rights', copyright_risk: 'high', copyright_risk_reasons: JSON.stringify(b.reasons), status_reason: `broadcast/pro footage: ${b.reasons.join(', ').slice(0, 160)}` });
+        log.info(`blocked ${c.id}: broadcast/pro footage (${b.reasons[0]})`);
+        return null;
+      }
       // the scorer only flags that a watermark exists; the exact handle comes from the two-frame reader (or stays null)
       const wm = await readWatermark(cfg, src, dir);
       c = { ...c, detected_handle: wm?.handle ?? null, detected_platform: wm?.platform ?? c.detected_platform ?? null };

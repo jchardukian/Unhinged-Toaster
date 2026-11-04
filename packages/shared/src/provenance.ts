@@ -37,3 +37,22 @@ export function ccProvenanceRisk(i: ProvenanceInput): { risk: ProvenanceRisk; re
   const risk: ProvenanceRisk = score >= 3 ? 'high' : score >= 1 ? 'medium' : 'low';
   return { risk, reasons: [...new Set(reasons)] };
 }
+
+/**
+ * Broadcast / professional-sports / TV footage is never produced (RIGHTS_POLICY: copyright risk "high"). The LLM rubric
+ * is asked to rate it high but rated an F1 podium clip and a TV news rescue "medium" in the 21-video run, so this
+ * keyword screen runs on the title, the feed description, the vision summary and the transcript as a hard backstop.
+ */
+const BROADCAST = [
+  /\b(f1|formula ?(1|one)|grand prix|motogp|nascar|indycar)\b/i, /\b(nfl|nba|nhl|mlb|mls|ufc|wwe|pga|atp|wta|fifa|uefa|ncaa)\b/i,
+  /\b(premier league|champions league|la liga|bundesliga|serie a|super bowl|world cup|olympics?|olympic)\b/i,
+  /\b(espn|fox sports|sky sports|bein|tnt sports|nbc sports|cbs sports|dazn)\b/i,
+  /\b(live (tv|broadcast|news)|news (anchor|report|reporter|channel|broadcast)|reporter|breaking news|press conference|telediario|noticias|canal \d+)\b/i,
+  /\b(talk show|late show|late night|tonight show|snl|saturday night live|game show|sitcom|episode \d+|season \d+)\b/i,
+  /\b(podium|post-?match|post-?game|halftime|commentator|play-by-play)\b/i,
+  /\b(trailer|official video|music video|concert footage)\b/i,
+];
+export function broadcastRisk(text: string): { high: boolean; reasons: string[] } {
+  const reasons = BROADCAST.filter((re) => re.test(text)).map((re) => `broadcast:${re.source.slice(0, 40)}`);
+  return { high: reasons.length > 0, reasons };
+}

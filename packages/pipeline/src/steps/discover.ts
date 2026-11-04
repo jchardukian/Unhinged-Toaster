@@ -1,4 +1,4 @@
-import { ccProvenanceRisk, qualityTier, ulid, initialRights, type Candidate, type ContentCategory, type SourceAdapter, type SourcePlatform } from '@toaster/shared';
+import { broadcastRisk, ccProvenanceRisk, qualityTier, ulid, initialRights, type Candidate, type ContentCategory, type SourceAdapter, type SourcePlatform } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { withRetry } from '../retry.js';
 import { ytdlpJson } from './media.js';
@@ -263,6 +263,7 @@ export async function discoverRedditRss(cfg: Config, limit: number, windows: ('d
           duration_sec: null, width: null, height: null, published_at: e.published,
           views: null, likes: Math.max(50, Math.round(3000 / (rank + 1))), comments: null, shares: null, engagement_velocity: null, // rank proxy only
           ...initialRights('reddit', {}),
+          ...redditRisk(e.title),
         });
       });
       await sleep(6500); // unauthenticated Reddit allows ~10 requests/min per IP; GitHub runners 429 at 2 s spacing
@@ -343,6 +344,12 @@ export async function discoverYouTubeSearch(cfg: Config, limit: number): Promise
     }
   }
   return dedupeById(out);
+}
+
+/** Reddit posts carry no licence; broadcast / pro-sports footage is marked high risk at discovery so it is never produced. */
+function redditRisk(text: string): { copyright_risk: 'high' | null; copyright_risk_reasons: string | null } {
+  const b = broadcastRisk(text);
+  return b.high ? { copyright_risk: 'high', copyright_risk_reasons: JSON.stringify(b.reasons) } : { copyright_risk: null, copyright_risk_reasons: null };
 }
 
 const numOr = (v: unknown) => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
@@ -588,6 +595,7 @@ export function parseRedditCandidate(post: RedditChild['data'], d: RedditChild['
     published_at: new Date(d.created_utc * 1000).toISOString(), views: null, likes: d.score, comments: d.num_comments, shares: d.num_crossposts ?? 0, engagement_velocity: null,
     ...initialRights('reddit', {}),
     quality_tier: qualityTier(rv.width, rv.height),
+    ...redditRisk(`${d.title}\n${d.selftext ?? ''}`),
   };
 }
 
