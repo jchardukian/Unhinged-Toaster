@@ -19,6 +19,14 @@ export function loadDotenv(file = path.join(repoRoot(), '.env')): void {
   }
 }
 
+/** The Worker URL the "Deploy control plane" workflow commits to config/worker-url.txt, so no variable needs to be set by hand. */
+export function deployedWorkerUrl(root: string): string | undefined {
+  const f = path.join(root, 'config', 'worker-url.txt');
+  if (!fs.existsSync(f)) return undefined;
+  const u = fs.readFileSync(f, 'utf8').trim();
+  return /^https:\/\/[a-z0-9.-]+\.workers\.dev$/.test(u) ? u : undefined;
+}
+
 export function repoRoot(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   // packages/pipeline/src or packages/pipeline/dist -> repo root
@@ -119,7 +127,7 @@ export function loadConfig(): Config {
     pexelsKey: e.PEXELS_API_KEY,
     pixabayKey: e.PIXABAY_API_KEY,
     r2: { accountId: e.R2_ACCOUNT_ID, accessKeyId: e.R2_ACCESS_KEY_ID, secretAccessKey: e.R2_SECRET_ACCESS_KEY, bucket: e.R2_BUCKET ?? 'toaster-media', publicBaseUrl: e.R2_PUBLIC_BASE_URL },
-    apiUrl: e.TOASTER_API_URL,
+    apiUrl: e.TOASTER_API_URL || deployedWorkerUrl(root),
     apiToken: e.TOASTER_API_TOKEN,
     workDir: path.resolve(root, e.WORK_DIR ?? 'work'),
     assetsDir: path.join(root, 'assets'),

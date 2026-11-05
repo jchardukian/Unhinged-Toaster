@@ -10,6 +10,7 @@ import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHou
 import { ytdlpCommonArgs } from '../src/steps/media.js';
 import { postText } from '../src/steps/publish.js';
 import { statsKnown } from '../src/steps/score.js';
+import { deployedWorkerUrl } from '../src/config.js';
 import { JsonStore } from '../src/store.js';
 import { parseJson } from '../src/llm.js';
 import type { Candidate, Production } from '@toaster/shared';
@@ -215,4 +216,14 @@ test('copy validate repairs length and sentence count instead of falling back to
   assert.ok(r.headline.length <= 60 && !/\s$/.test(r.headline));
   assert.equal(r.commentary, 'That cat just launched itself into the toy like a stunt double.');
   assert.equal(validate({ headline: 'X', commentary: '', caption: '', hashtags: [] } as never), null);
+});
+
+test('worker URL falls back to config/worker-url.txt written by the deploy workflow', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toaster-root-'));
+  assert.equal(deployedWorkerUrl(root), undefined);
+  fs.mkdirSync(path.join(root, 'config'));
+  fs.writeFileSync(path.join(root, 'config', 'worker-url.txt'), 'https://toaster-api.someone.workers.dev\n');
+  assert.equal(deployedWorkerUrl(root), 'https://toaster-api.someone.workers.dev');
+  fs.writeFileSync(path.join(root, 'config', 'worker-url.txt'), 'javascript:alert(1)');
+  assert.equal(deployedWorkerUrl(root), undefined);
 });
