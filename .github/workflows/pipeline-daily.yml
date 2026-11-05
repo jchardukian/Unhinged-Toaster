@@ -51,7 +51,6 @@ jobs:
           YTDLP_YOUTUBE_CLIENTS: ${{ vars.YTDLP_YOUTUBE_CLIENTS }}
           YOUTUBE_VIRAL_WINDOWS: ${{ vars.YOUTUBE_VIRAL_WINDOWS }}
           REDDIT_WINDOWS: ${{ vars.REDDIT_WINDOWS }}
-          YTDLP_COOKIES_B64: ${{ secrets.YTDLP_COOKIES_B64 }}
           STICKERS: ${{ vars.STICKERS }}
           MUSIC_DEFAULT: ${{ vars.MUSIC_DEFAULT }}
           TRANSFORMATION_REVIEW: ${{ vars.TRANSFORMATION_REVIEW }}

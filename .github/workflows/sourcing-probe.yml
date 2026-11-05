@@ -33,7 +33,6 @@ jobs:
       - name: discover --dry-run
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          YTDLP_COOKIES_B64: ${{ secrets.YTDLP_COOKIES_B64 }}
           YTDLP_YOUTUBE_CLIENTS: ${{ vars.YTDLP_YOUTUBE_CLIENTS }}
           YOUTUBE_VIRAL_WINDOWS: ${{ vars.YOUTUBE_VIRAL_WINDOWS }}
           REDDIT_WINDOWS: ${{ vars.REDDIT_WINDOWS }}

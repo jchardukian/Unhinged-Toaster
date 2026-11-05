@@ -93,7 +93,6 @@ jobs:
           WORK_DIR: ./work
           YOUTUBE_VIRAL_WINDOWS: today,week,month,alltime
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          YTDLP_COOKIES_B64: ${{ secrets.YTDLP_COOKIES_B64 }}
           YTDLP_YOUTUBE_CLIENTS: ${{ matrix.clients }}
           YTDLP_ASSUME_FETCHABLE: 'true'
         run: node packages/pipeline/dist/cli.js discover --dry-run --sources "${{ matrix.sources }}" --limit "${{ matrix.limit }}" --fetch "${{ matrix.fetch }}"

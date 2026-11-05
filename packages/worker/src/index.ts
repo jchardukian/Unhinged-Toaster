@@ -155,17 +155,23 @@ function upsertStmt(env: Env, table: string, cols: readonly string[], obj: objec
 }
 
 async function serveMedia(env: Env, key: string, req: Request): Promise<Response> {
-  const obj = await env.MEDIA.get(key, { range: req.headers });
+  // Public, read-only: Buffer (and the platforms) fetch rendered videos from here. Full requests answer 200 with a
+  // content-length; only an explicit Range request answers 206 (the local test showed 206 on plain GETs before).
+  const wantsRange = !!req.headers.get('range');
+  const obj = await env.MEDIA.get(key, wantsRange ? { range: req.headers } : undefined);
   if (!obj) return new Response('not found', { status: 404 });
   const headers = new Headers();
   obj.writeHttpMetadata(headers);
   headers.set('etag', obj.httpEtag);
   headers.set('accept-ranges', 'bytes');
-  if (obj.range && 'offset' in obj.range) {
-    const end = (obj.range.offset ?? 0) + (obj.range.length ?? obj.size) - 1;
+  if (wantsRange && obj.range && 'offset' in obj.range) {
+    const length = obj.range.length ?? obj.size - (obj.range.offset ?? 0);
+    const end = (obj.range.offset ?? 0) + length - 1;
     headers.set('content-range', `bytes ${obj.range.offset}-${end}/${obj.size}`);
+    headers.set('content-length', String(length));
     return new Response(obj.body, { status: 206, headers });
   }
+  headers.set('content-length', String(obj.size));
   return new Response(obj.body, { headers });
 }
 

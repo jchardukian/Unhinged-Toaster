@@ -1,8 +1,11 @@
 # Brand assets
 
 The renderer looks for the **approved** files below first and falls back to generated placeholders in `generated/`.
-The approved The Unhinged Toaster brand files were **not accessible** in this environment, so the pipeline currently
-ships with placeholders (red/black/yellow sunburst, comic burst box, a drawn angry-toaster placeholder, Bangers font).
+Status at launch: `mascot.png`, `logo.png` and `wordmark.png` are cut from the channel's real avatar art and are what
+the finished videos show; the background is a burst generated from the brand colours (`colors.json`), the headline is
+rendered as brush lettering (no box image needed). No placeholder artwork is used in finished videos. The one asset
+that is genuinely missing is **music**: `../music/manifest.json` lists only an example entry, so videos ship without a
+music bed until the owner drops licensed tracks there (see `../music/README.md`).
 
 ## Exact files needed (drop them in this folder with these names)
 
