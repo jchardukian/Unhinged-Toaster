@@ -1,0 +1,77 @@
+name: Deploy control plane (Cloudflare)
+
+# Creates/updates the Cloudflare side (D1 database, R2 bucket, migrations, Worker secrets, Worker deploy) from the
+# secrets stored in GitHub, then commits the Worker URL to config/worker-url.txt so the pipeline finds it without any
+# variable being set by hand. Safe to re-run. Needs these repository secrets:
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, BUFFER_API_KEY, TOASTER_API_TOKEN (any long random text);
+#   optional WORKER_GITHUB_TOKEN.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+    paths: ['.github/workflows/deploy-cloudflare.yml']   # ignored unless the commit message contains [deploy]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: toaster-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check the secrets are present (names only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
+        run: |
+          missing=""
+          for k in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BUFFER_API_KEY TOASTER_API_TOKEN; do [ -n "${!k}" ] || missing="$missing $k"; done
+          if [ -n "$missing" ]; then
+            echo "## Deploy stopped: missing GitHub secrets:$missing" >> "$GITHUB_STEP_SUMMARY"
+            echo "Add them at Settings → Secrets and variables → Actions → New repository secret (see docs/DEPLOYMENT.md)." >> "$GITHUB_STEP_SUMMARY"
+            echo "missing secrets:$missing"; exit 1
+          fi
+      - name: Create / update the Cloudflare control plane
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
+          WORKER_GITHUB_TOKEN: ${{ secrets.WORKER_GITHUB_TOKEN }}
+        run: bash scripts/deploy-cloudflare.sh
+      - name: Verify the public media route
+        env:
+          URL: ${{ steps.cf.outputs.worker_url }}
+          TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
+        run: |
+          set -e
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/candidates"); [ "$code" = "401" ] || { echo "expected 401 without token, got $code"; exit 1; }
+          printf 'ok' > probe.txt
+          curl -sf -X PUT -H "authorization: Bearer $TOASTER_API_TOKEN" -H 'content-type: text/plain' --data-binary @probe.txt "$URL/upload/deploy-probe/ok.txt" > /dev/null
+          body=$(curl -sf "$URL/media/deploy-probe/ok.txt"); [ "$body" = "ok" ] || { echo "public media route failed"; exit 1; }
+          echo "Worker is live at $URL; auth, upload and public media verified."
+      - name: Record the Worker URL in the repository
+        env:
+          URL: ${{ steps.cf.outputs.worker_url }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add config/worker-url.txt
+          if git diff --cached --quiet; then echo "worker URL unchanged"; else git commit -m "Record deployed Worker URL [skip ci]" && git push; fi
+          { echo "## Control plane deployed"; echo "- Worker: $URL (auth, upload and public media verified)"; echo "- D1 migrations applied, R2 bucket ready, Worker secrets set"; echo "- URL recorded in config/worker-url.txt"; } >> "$GITHUB_STEP_SUMMARY"

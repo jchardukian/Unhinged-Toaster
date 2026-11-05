@@ -1,0 +1,66 @@
+# Fallback approval poller for when the Cloudflare Worker is not deployed yet.
+# The Worker's cron does the same job every 30 minutes once it is live; keep only one of them enabled.
+name: Pipeline - Buffer sync (fallback)
+
+on:
+  schedule:
+    - cron: '45 */2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: toaster-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    if: ${{ vars.BUFFER_SYNC_VIA_ACTIONS == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg python3-pil && pip install -q "yt-dlp[default]"
+      - run: npm ci && npm run build && npm run brand:generate
+      - name: sync (reconcile approvals, replace rejections)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ vars.ELEVENLABS_VOICE_ID }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
+          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          ENABLE_YOUTUBE_CC: ${{ vars.ENABLE_YOUTUBE_CC }}
+          ENABLE_YOUTUBE_TRANSFORM: ${{ vars.ENABLE_YOUTUBE_TRANSFORM }}
+          TIKTOK_ACCOUNTS: ${{ vars.TIKTOK_ACCOUNTS }}
+          YTDLP_YOUTUBE_CLIENTS: ${{ vars.YTDLP_YOUTUBE_CLIENTS }}
+          STICKERS: ${{ vars.STICKERS }}
+          MUSIC_DEFAULT: ${{ vars.MUSIC_DEFAULT }}
+          TRANSFORMATION_REVIEW: ${{ vars.TRANSFORMATION_REVIEW }}
+          MAX_COPYRIGHT_RISK: ${{ vars.MAX_COPYRIGHT_RISK }}
+          DISCOVERY_SOURCES: ${{ vars.DISCOVERY_SOURCES }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL }}
+          TOASTER_API_URL: ${{ vars.TOASTER_API_URL }}
+          TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE }}
+          PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS }}
+        run: |
+          node packages/pipeline/dist/cli.js sync
+          node packages/pipeline/dist/cli.js learn

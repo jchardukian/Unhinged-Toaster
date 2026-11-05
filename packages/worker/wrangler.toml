@@ -1,0 +1,39 @@
+name = "toaster-api"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# --- bindings -------------------------------------------------------------
+# Create once:
+#   wrangler d1 create toaster-db        -> paste database_id below
+#   wrangler r2 bucket create toaster-media
+#   wrangler secret put API_TOKEN        (shared secret used by the pipeline runner)
+#   wrangler secret put BUFFER_API_KEY   (Buffer > Settings > API)
+#   wrangler secret put GITHUB_TOKEN     (fine-grained PAT with Actions:write on jchardukian/Unhinged-Toaster)
+[[d1_databases]]
+binding = "DB"
+database_name = "toaster-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "toaster-media"
+
+[vars]
+BUFFER_ORGANIZATION_ID = "6abaf3c8c5df6d1c7b1c9d3c"
+BUFFER_YOUTUBE_CHANNEL_ID = "6ae95257e29c69a17143de1d"
+BUFFER_TIKTOK_CHANNEL_ID = "6ae9500ee29c69a17143c263"
+BUFFER_TIMEZONE = "America/Chicago"
+PUBLISH_SLOTS = "11:00,15:00,19:00"
+GITHUB_REPO = "jchardukian/Unhinged-Toaster"
+
+# --- cron -----------------------------------------------------------------
+# every 30 min: poll Buffer for approvals / rejections (no webhooks exist)
+# 03:00 UTC daily: pull metrics + learn
+# Sunday 14:00 UTC (08:00 Chicago): dispatch the weekly batch workflow in GitHub Actions
+[triggers]
+crons = ["*/30 * * * *", "0 3 * * *", "0 14 * * 0"]
+
+[observability]
+enabled = true

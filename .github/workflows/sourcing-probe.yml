@@ -1,0 +1,49 @@
+name: Sourcing probe (dry run)
+
+# Proves, on a real GitHub runner, what the viral sources find and that the top clip can be fetched at full
+# resolution. Nothing is stored, scored, rendered or drafted. Results land in the job summary.
+on:
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: 'Comma-separated adapters to probe'
+        default: 'youtube_viral,reddit_rss'
+      limit:
+        description: 'Rows per list'
+        default: '20'
+      fetch:
+        description: 'Download the top N candidates to verify the fetch path'
+        default: '1'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && pip install -q "yt-dlp[default]"
+      - run: npm ci && npm run build
+      - name: discover --dry-run
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YTDLP_YOUTUBE_CLIENTS: ${{ vars.YTDLP_YOUTUBE_CLIENTS }}
+          YOUTUBE_VIRAL_WINDOWS: ${{ vars.YOUTUBE_VIRAL_WINDOWS }}
+          REDDIT_WINDOWS: ${{ vars.REDDIT_WINDOWS }}
+          TIKTOK_ACCOUNTS: ${{ vars.TIKTOK_ACCOUNTS }}
+          WORK_DIR: ./work
+          YTDLP_ASSUME_FETCHABLE: 'true'   # always try, so the summary shows whether this runner is bot-walled
+        run: node packages/pipeline/dist/cli.js discover --dry-run --sources "${{ inputs.sources }}" --limit "${{ inputs.limit }}" --fetch "${{ inputs.fetch }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-downloads
+          path: work/probe/
+          if-no-files-found: ignore
+          retention-days: 3
