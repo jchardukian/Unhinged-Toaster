@@ -33,7 +33,7 @@ GITHUB_REPO = "jchardukian/Unhinged-Toaster"
 # 03:00 UTC daily: pull metrics + learn
 # Sunday 14:00 UTC (08:00 Chicago): dispatch the weekly batch workflow in GitHub Actions
 [triggers]
-crons = ["*/30 * * * *", "0 3 * * *", "0 14 * * 0"]
+crons = ["*/30 * * * *", "0 3 * * *", "0 14 * * SUN"]
 
 [observability]
 enabled = true
