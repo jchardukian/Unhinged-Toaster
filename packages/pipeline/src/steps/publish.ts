@@ -44,6 +44,8 @@ export interface PublishOptions {
   weeks?: ('current' | 'next')[];
   /** Minimum lead time before a slot for a draft to still be worth creating (owner needs time to approve). */
   minLeadHours?: number;
+  /** pilot: draft at most this many productions (each becomes 2 posts) */
+  limit?: number;
 }
 
 export interface PublishResult { created: number; adopted: number; skipped: number; failed: number; openSlots: number; weeks: string[] }
@@ -61,7 +63,7 @@ export async function publishWeek(cfg: Config, store: Store, opts: PublishOption
   const lead = (opts.minLeadHours ?? 20) * 3600_000;
   const result: PublishResult = { created: 0, adopted: 0, skipped: 0, failed: 0, openSlots: 0, weeks: [] };
   const client = opts.dryRun ? null : opts.client ?? bufferClient(cfg);
-  const pool = await unpostedProductions(store);
+  const pool = (await unpostedProductions(store)).slice(0, opts.limit ?? Infinity);
 
   for (const which of weeks) {
     const plan: SlotPlan = buildWeekPlan(now(), cfg.tz, cfg.publishSlots, ['youtube', 'tiktok'], which === 'current' ? 0 : 1);

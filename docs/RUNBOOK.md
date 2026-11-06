@@ -69,6 +69,23 @@ npm run toaster -- status
 ```
 Without `TOASTER_API_URL` the CLI uses `work/db.json`, so everything can be exercised locally first.
 
+## Testing ladder (cheap first; run before any weekly batch)
+
+GitHub → Actions → "Diagnostics (preflight / smoke / pilot)" → Run workflow. Each rung has its own API budget
+(`budget` input, default $2; the run stops with a clear message when it is used up) and per-step time limits.
+
+| rung | what it does | time | cost | creates Buffer posts? |
+|---|---|---|---|---|
+| `preflight` | configuration + **one real scoring call with the configured model** + Worker reachability and token + Buffer account/channels (read-only) + ElevenLabs voices + Reddit feed; exit 1 with the failing row when something essential is broken | ~1 min | < $0.01 | no |
+| `smoke` | 2 feeds → score ≤ 5 → download and render exactly 1 Short → fetch its public URL and check it plays | ~6 min | < $0.20 | no |
+| `pilot` | 3 distinct Shorts through the full path; Buffer **drafts** only when `create_drafts` is ticked (owner still approves) | ~15 min | < $0.50 | only if ticked |
+
+The weekly batch and the daily run execute the production preflight first and refuse to start when it fails. Failed LLM
+calls never count as scores: such candidates stay `discovered` with an `llm_error` reason and are re-scored next run;
+two consecutive 400/401/403 answers from a service stop the run immediately (circuit breaker) instead of repeating the
+same error for every candidate. Spend is metered (`API_BUDGET_USD`, production default $15 weekly / $8 daily; set the
+repository variable to change it) and reported at the end of every run together with elapsed time.
+
 ## Weekly operation
 - Sunday morning: read the readiness report (weekly run summary or `GET <worker>/weeks/next/report?format=md`): it lists which drafts are transformation-review (source, creator, copyright risk) and which have an explicit basis. Then open Buffer → Drafts (review drafts carry the REVIEW tag when configured). Approve ("Add to queue" or "Schedule") or delete. Captions are already public-ready: creator credit, source link, edit summary, contact e-mail.
 - Nothing else. A deletion is confirmed after two polls ≥ 10 min apart, then a replacement is rendered and drafted into the same slot (Worker: ~30–60 min; Actions fallback: ~2–4 h). Replacements are new drafts, so they appear in the Drafts tab for your next look.

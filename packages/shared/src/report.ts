@@ -93,6 +93,7 @@ export function buildReadinessReport(input: {
       case 'rejected_duplicate': bump('duplicate'); break;
       case 'rejected_quality': bump(`quality_below_720p${c.width && c.height ? ` (${c.width}x${c.height})` : ''}`); break;
       case 'failed': bump(`render_failed:${(c.status_reason ?? 'unknown').slice(0, 60)}`); break;
+      case 'discovered': if (c.status_reason?.startsWith('llm_error')) bump('llm_error (not scored; retried next run)'); break;
       case 'scored':
       case 'ready':
         if (c.rights_status !== 'cleared' && c.rights_status !== 'transformation_review' && c.rights_status !== 'owner_reviewed') bump(`rights:${c.rights_status}`); break;

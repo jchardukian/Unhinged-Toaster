@@ -7,7 +7,10 @@ import { alert } from './alerts.js';
 import { loadConfig, log, repoRoot, type Config } from './config.js';
 import { makeStore, type Store } from './store.js';
 import { discoverAll, youtubeFetchGuard } from './steps/discover.js';
-import { produceCandidate, produceUntil, scoreAll } from './steps/produce.js';
+import { produceCandidate, produceUntil, rescoreUnscored, scoreAll } from './steps/produce.js';
+import { runPreflight } from './steps/preflight.js';
+import { runPilot, runSmoke, writeSummary } from './steps/ladder.js';
+import { budget, isFatal, setBudget, spentUsd } from './guard.js';
 import { publishWeek } from './steps/publish.js';
 import { readinessReport } from './steps/report.js';
 import { fetchProbe, funnelReport } from './steps/funnel.js';
@@ -16,6 +19,11 @@ import { learn, syncBuffer } from './steps/sync.js';
 import { runDemo } from './demo.js';
 
 const USAGE = `toaster <command> [options]
+
+Testing ladder (cheap first; API_BUDGET_USD caps spend, default $2)
+  preflight [--mode production|diagnostic]   config + one scoring call + Worker + Buffer (read-only) + voices + feed; exit 1 if blocked
+  smoke                     2 feeds -> score <= 5 -> render exactly 1 -> verify the public URL plays; no Buffer posts
+  pilot [--drafts]          3 distinct Shorts; Buffer DRAFTS only with --drafts (owner still approves)
 
 Daily / weekly automation
   run-daily [--stock 10]    discover -> score -> keep >= N finished productions in stock -> fill open slots -> report
@@ -65,7 +73,15 @@ async function main() {
       await discoverInto(cfg, store, sources, Number(flags.limit ?? 50));
       return;
     }
-    case 'score': { await scoreAll(cfg, store); return; }
+    case 'preflight': {
+      const r = await runPreflight(cfg, flags.mode === 'diagnostic' ? 'diagnostic' : 'production');
+      console.log(r.markdown); writeSummary(r.markdown);
+      if (!r.ok) process.exitCode = 1;
+      return;
+    }
+    case 'smoke': { const r = await runSmoke(cfg, store); console.log(r.markdown); writeSummary(r.markdown); if (!r.ok) process.exitCode = 1; return; }
+    case 'pilot': { const r = await runPilot(cfg, store, { drafts: !!flags.drafts, count: Number(flags.count ?? 3) }); console.log(r.markdown); writeSummary(r.markdown); if (!r.ok) process.exitCode = 1; return; }
+    case 'score': { if (flags.rescore) await rescoreUnscored(store); await scoreAll(cfg, store, Number(flags.limit ?? 200)); return; }
     case 'fetch': { const r = await fetchProbe(cfg, store, Number(flags.limit ?? 30)); log.info(`fetch probe: tried ${r.tried}, ok ${r.ok}, failed/rejected ${r.failed}`); return; }
     case 'funnel': {
       const { funnel, markdown } = await funnelReport(cfg, store);
@@ -110,6 +126,11 @@ async function main() {
       return;
     }
     case 'run-daily': {
+      if (!process.env.API_BUDGET_USD) setBudget(8);
+      const pre = await runPreflight(cfg, 'production');
+      writeSummary(pre.markdown);
+      if (!pre.ok) { console.log(pre.markdown); log.error('preflight failed: the daily run does not start'); process.exitCode = 1; return; }
+      await rescoreUnscored(store);
       await discoverInto(cfg, store, defaultSources(cfg).split(',').filter(Boolean) as SourceAdapter[], Number(flags.limit ?? 50));
       await scoreAll(cfg, store);
       const stock = Number(flags.stock ?? 10);
@@ -125,6 +146,11 @@ async function main() {
     }
     case 'run-weekly': {
       const dryRun = !!flags['dry-run'];
+      if (!process.env.API_BUDGET_USD) setBudget(15); // production default; diagnostics keep $2
+      const pre = await runPreflight(cfg, dryRun ? 'diagnostic' : 'production');
+      writeSummary(pre.markdown);
+      if (!pre.ok) { console.log(pre.markdown); log.error('preflight failed: the weekly batch does not start'); process.exitCode = 1; return; }
+      await rescoreUnscored(store);
       // up to 3 rounds: produce -> publish -> re-check, so transient failures get a second chance within the run
       let last = { created: 0, adopted: 0, failed: 0, openSlots: 0 };
       for (let round = 1; round <= 3; round++) {
@@ -313,4 +339,10 @@ export function parseFlags(args: string[]): Record<string, string | boolean> {
 }
 
 main().then(() => { for (const l of flushUsage(loadConfig().workDir, process.argv[2] ?? 'cli')) log.info(l); })
-  .catch((e) => { log.error((e as Error).stack ?? String(e)); flushUsage(loadConfig().workDir, process.argv[2] ?? 'cli'); process.exit(1); });
+  .catch((e) => {
+    if (isFatal(e)) log.error(`STOPPED: ${(e as Error).message} (spent $${spentUsd().toFixed(4)} of $${budget().toFixed(2)})`);
+    else log.error((e as Error).stack ?? String(e));
+    for (const l of flushUsage(loadConfig().workDir, process.argv[2] ?? 'cli')) log.info(l);
+    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## ❌ ${process.argv[2]} stopped\n${(e as Error).message}\n`);
+    process.exit(1);
+  });

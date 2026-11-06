@@ -1,5 +1,6 @@
 import { CONTENT_CATEGORIES, finalScore, heuristicScore, llmScore, MIN_FINAL_SCORE, type Candidate, type CategoryWeight, type LlmScoreResult } from '@toaster/shared';
 import { log, type Config } from '../config.js';
+import { isFatal } from '../guard.js';
 import { chatJson } from '../llm.js';
 
 const SYSTEM = `You are the content editor for "The Unhinged Toaster", a comedy Shorts channel (YouTube Shorts + TikTok).
@@ -36,6 +37,7 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
   let c = cIn;
   const h = heuristicScore(c);
   let llm: LlmScoreWithRisk | null = null;
+  let llmError: string | null = null;
   try {
     llm = await chatJson<LlmScoreWithRisk>(cfg, SYSTEM, JSON.stringify({
       title: c.title,
@@ -55,14 +57,15 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
       c = { ...c, copyright_risk: cr, copyright_risk_reasons: JSON.stringify(llm.copyright_risk_reasons ?? []) };
     }
   } catch (e) {
-    log.warn(`llm scoring failed for ${c.id}: ${(e as Error).message}`);
+    if (isFatal(e)) throw e; // budget exhausted or the API keeps rejecting us: abort the run, do not keep calling
+    llmError = (e as Error).message.split('\n')[0].slice(0, 200);
+    log.warn(`llm scoring failed for ${c.id}: ${llmError}`);
   }
   const now = new Date().toISOString();
   if (!llm) {
-    // Without an LLM we only trust the heuristic, discounted, and we never auto-pass safety.
-    const f = finalScore(h, h * 0.8, c.category, weights);
-    const blockedByProvenance = c.copyright_risk === 'high' && c.rights_status !== 'cleared';
-    return { ...c, heuristic_score: h, llm_score: null, final_score: f, status: blockedByProvenance ? 'blocked_rights' : f >= MIN_FINAL_SCORE ? 'scored' : 'rejected_score', status_reason: blockedByProvenance ? 'copyright_risk high (provenance)' : 'heuristic_only', updated_at: now };
+    // An LLM failure is NOT a score. The candidate stays 'discovered' (so the next run re-scores it) with the error
+    // recorded; it is never passed or rejected on the heuristic alone (run 42237222419 "scored" 320 candidates that way).
+    return { ...c, heuristic_score: h, llm_score: null, final_score: null, status: 'discovered', status_reason: `llm_error: ${llmError ?? 'no response'}`, updated_at: now };
   }
   const { score, blocked, reason } = llmScore(llm);
   const category = CONTENT_CATEGORIES.includes(llm.category) ? llm.category : c.category;
