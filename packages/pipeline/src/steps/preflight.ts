@@ -15,7 +15,7 @@ import { scoreCandidate } from './score.js';
 export interface Check { name: string; ok: boolean; essential: boolean; detail: string }
 export type PreflightMode = 'production' | 'diagnostic';
 
-export async function runPreflight(cfg: Config, mode: PreflightMode, deps: { fetch?: typeof fetch; score?: typeof scoreCandidate; bufferClient?: (key: string) => Pick<BufferClient, 'account' | 'channels'> } = {}): Promise<{ ok: boolean; checks: Check[]; markdown: string }> {
+export async function runPreflight(cfg: Config, mode: PreflightMode, deps: { fetch?: typeof fetch; score?: typeof scoreCandidate; bufferClient?: (key: string) => Pick<BufferClient, 'account' | 'channels'>; hasTool?: (tool: string) => boolean } = {}): Promise<{ ok: boolean; checks: Check[]; markdown: string }> {
   const get = (url: string, init: RequestInit = {}, ms = 15_000) => (deps.fetch ? deps.fetch(url, init) : fetchWithTimeout(url, init, ms, url));
   const checks: Check[] = [];
   const add = (name: string, ok: boolean, essential: boolean, detail: string) => { checks.push({ name, ok, essential, detail }); log.info(`${ok ? 'OK  ' : essential ? 'FAIL' : 'warn'} ${name}: ${detail}`); };
@@ -27,10 +27,8 @@ export async function runPreflight(cfg: Config, mode: PreflightMode, deps: { fet
   add('ElevenLabs key', !!cfg.elevenKey || !!process.env.HTTPS_PROXY, false, cfg.elevenKey ? 'ELEVENLABS_API_KEY present' : 'missing: videos would ship without voice');
   add('Buffer key', !!cfg.bufferKey, production, cfg.bufferKey ? 'BUFFER_API_KEY present' : 'BUFFER_API_KEY missing' + (production ? '' : ' (not needed for this diagnostic)'));
   add('Control plane settings', !!(cfg.apiUrl && cfg.apiToken), production, cfg.apiUrl && cfg.apiToken ? `TOASTER_API_URL + TOASTER_API_TOKEN present (${cfg.apiUrl})` : !cfg.apiUrl ? 'TOASTER_API_URL missing (config/worker-url.txt not found)' : 'TOASTER_API_TOKEN missing' + (production ? '' : ' (local store will be used)'));
-  for (const tool of ['ffmpeg', 'ffprobe']) {
-    let ok = true; try { execFileSync(tool, ['-version'], { stdio: 'ignore' }); } catch { ok = false; }
-    add(`tool ${tool}`, ok, true, ok ? 'found' : 'not installed');
-  }
+  const hasTool = deps.hasTool ?? ((tool: string) => { try { execFileSync(tool, ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } });
+  for (const tool of ['ffmpeg', 'ffprobe']) { const ok = hasTool(tool); add(`tool ${tool}`, ok, true, ok ? 'found' : 'not installed'); }
   add('brand assets', ['mascot.png', 'logo.png', 'wordmark.png'].every((a) => fs.existsSync(path.join(cfg.assetsDir, 'brand', a))), true, 'mascot / logo / wordmark');
   add('headline font', fs.existsSync(path.join(cfg.templateDir, 'fonts', 'Bangers-Regular.ttf')), true, 'template/fonts/Bangers-Regular.ttf');
 

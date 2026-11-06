@@ -66,15 +66,15 @@ test('preflight: reports each essential check and blocks on a failed scoring cal
   }) as unknown as typeof fetch;
   const cfgP = { ...cfg, apiUrl: 'https://toaster-api.example.workers.dev', apiToken: 'super-secret-token', bufferKey: 'buffer-secret-key' } as Config;
   const bufferClient = () => ({ account: async () => ({ id: 'a', timezone: 'America/Chicago', organizations: [{ id: 'o'.repeat(24), name: 'Org' }] }), channels: async () => [{ id: 'y'.repeat(24), name: 'YT', service: 'youtube' }, { id: 't'.repeat(24), name: 'TT', service: 'tiktok' }] });
-  const good = await runPreflight(cfgP, 'production', { fetch: fetchStub, score: okScore, bufferClient });
+  const good = await runPreflight(cfgP, 'production', { fetch: fetchStub, score: okScore, bufferClient, hasTool: () => true });
   assert.equal(good.ok, true, good.markdown);
   assert.doesNotMatch(good.markdown, /super-secret-token|buffer-secret-key/);
   assert.match(good.markdown, /Buffer channels \| ✅/);
-  const bad = await runPreflight(cfgP, 'production', { fetch: fetchStub, score: badScore, bufferClient });
+  const bad = await runPreflight(cfgP, 'production', { fetch: fetchStub, score: badScore, bufferClient, hasTool: () => true });
   assert.equal(bad.ok, false);
   assert.match(bad.markdown, /OpenAI scoring call \| ❌/);
   // missing Buffer key blocks production but not a diagnostic
   const noBuf = { ...cfgP, bufferKey: undefined } as Config;
-  assert.equal((await runPreflight(noBuf, 'production', { fetch: fetchStub, score: okScore })).ok, false);
-  assert.equal((await runPreflight(noBuf, 'diagnostic', { fetch: fetchStub, score: okScore })).ok, true);
+  assert.equal((await runPreflight(noBuf, 'production', { fetch: fetchStub, score: okScore, hasTool: () => true })).ok, false);
+  assert.equal((await runPreflight(noBuf, 'diagnostic', { fetch: fetchStub, score: okScore, hasTool: () => true })).ok, true);
 });
