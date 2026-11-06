@@ -67,7 +67,7 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
           R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL }}
-          TOASTER_API_URL: ${{ vars.TOASTER_API_URL }}
+          TOASTER_API_URL: ${{ vars.TOASTER_API_URL || 'https://toaster-api.jchardukian.workers.dev' }}
           TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           BUFFER_APPROVAL_MODE: ${{ vars.BUFFER_APPROVAL_MODE }}
@@ -75,14 +75,14 @@ jobs:
           BUFFER_TAG_CLEARED_ID: ${{ vars.BUFFER_TAG_CLEARED_ID }}
           CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
           COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT }}
-          BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE }}
-          PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS }}
+          BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE || 'America/Chicago' }}
+          PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS || '11:00,15:00,19:00' }}
         run: node packages/pipeline/dist/cli.js run-weekly ${{ inputs.dry_run && '--dry-run' || '' }}
       - name: Readiness report (always)
         if: always()
         env:
-          TOASTER_API_URL: ${{ vars.TOASTER_API_URL }}
+          TOASTER_API_URL: ${{ vars.TOASTER_API_URL || 'https://toaster-api.jchardukian.workers.dev' }}
           TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
-          BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE }}
-          PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS }}
+          BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE || 'America/Chicago' }}
+          PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS || '11:00,15:00,19:00' }}
         run: node packages/pipeline/dist/cli.js report
