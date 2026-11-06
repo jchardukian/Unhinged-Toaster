@@ -43,7 +43,7 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     if (event.cron === '*/30 * * * *') ctx.waitUntil(syncBuffer(env).then((r) => logEvent(env, 'sync', null, r)));
     else if (event.cron === '0 3 * * *') ctx.waitUntil(learn(env).then((r) => logEvent(env, 'learn', null, r)));
-    else if (event.cron === '0 14 * * 0') ctx.waitUntil(dispatchWorkflow(env, 'weekly-batch.yml').then((r) => logEvent(env, 'dispatch', 'weekly-batch', r)));
+    else if (event.cron === '0 14 * * SUN') ctx.waitUntil(dispatchWorkflow(env, 'weekly-batch.yml').then((r) => logEvent(env, 'dispatch', 'weekly-batch', r)));
   },
 };
 
