@@ -1,0 +1,90 @@
+name: Diagnostics (preflight / smoke / pilot)
+
+# Cost-controlled testing ladder. Run this before any weekly batch:
+#   preflight (~1 min, < $0.01): configuration, one real scoring call, Worker, Buffer (read-only), voices, feed
+#   smoke     (~6 min, < $0.20): 2 feeds, score <= 5, render exactly 1 Short, verify the public URL plays
+#   pilot     (~15 min, < $0.50): 3 distinct Shorts; Buffer DRAFTS only when create_drafts is ticked (owner still approves)
+# API spend is metered and capped by `budget`; nothing is ever published.
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: 'Which rung of the ladder'
+        type: choice
+        options: [preflight, smoke, pilot]
+        default: preflight
+      create_drafts:
+        description: 'pilot only: create Buffer DRAFTS for the pilot Shorts (never publishes)'
+        type: boolean
+        default: false
+      budget:
+        description: 'API budget in USD for this run'
+        default: '2'
+
+concurrency:
+  group: toaster-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg python3-pil && pip install -q "yt-dlp[default]"
+        timeout-minutes: 5
+      - run: npm ci && npm run build && npm run brand:generate
+        timeout-minutes: 5
+      - name: Reuse downloads and work files from earlier runs
+        uses: actions/cache@v4
+        with:
+          path: work/jobs
+          key: toaster-jobs-${{ github.run_id }}
+          restore-keys: toaster-jobs-
+      - name: ${{ inputs.level }}
+        timeout-minutes: ${{ inputs.level == 'preflight' && 5 || inputs.level == 'smoke' && 12 || 25 }}
+        env:
+          API_BUDGET_USD: ${{ inputs.budget }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          VISION_OCR_MODEL: ${{ vars.VISION_OCR_MODEL || 'gpt-4o' }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ vars.ELEVENLABS_VOICE_ID }}
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE || 'America/Chicago' }}
+          PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS || '11:00,15:00,19:00' }}
+          BUFFER_TAG_REVIEW_ID: ${{ vars.BUFFER_TAG_REVIEW_ID }}
+          BUFFER_TAG_CLEARED_ID: ${{ vars.BUFFER_TAG_CLEARED_ID }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+          COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT }}
+          MUSIC_DEFAULT: ${{ vars.MUSIC_DEFAULT }}
+          TRANSFORMATION_REVIEW: ${{ vars.TRANSFORMATION_REVIEW }}
+          MAX_COPYRIGHT_RISK: ${{ vars.MAX_COPYRIGHT_RISK }}
+          TOASTER_API_URL: ${{ vars.TOASTER_API_URL }}
+          TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
+          REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
+          WORK_DIR: ./work
+        run: |
+          case "${{ inputs.level }}" in
+            preflight) node packages/pipeline/dist/cli.js preflight --mode production ;;
+            smoke)     node packages/pipeline/dist/cli.js smoke ;;
+            pilot)     node packages/pipeline/dist/cli.js pilot ${{ inputs.create_drafts && '--drafts' || '' }} ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnostics-${{ inputs.level }}
+          path: |
+            work/jobs/*/*.final.mp4
+            work/jobs/*/*.final.jpg
+            work/usage.jsonl
+          if-no-files-found: ignore
+          retention-days: 7

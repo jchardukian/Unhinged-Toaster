@@ -14,6 +14,7 @@ import { synthesiseCommentary } from './tts.js';
 import { uploadPublic } from './upload.js';
 import { withRetry } from '../retry.js';
 import { recordRender, recordUpload } from '../usage.js';
+import { assertBudget, isFatal, TIMEOUTS, withTimeout } from '../guard.js';
 
 /**
  * Turn ONE cleared, scored candidate into a finished Production:
@@ -28,6 +29,18 @@ export function rightsPolicy(cfg: Config): RightsPolicy {
 export function maxSourceSec(cfg: Config): number { return loadTemplate(cfg).limits.maxDurationSec + 6; }
 
 export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate, opts: { allowOkTier?: boolean } = {}): Promise<Production | null> {
+  assertBudget(`produce ${cIn.id}`);
+  try {
+    return await withTimeout(produceCandidateInner(cfg, store, cIn, opts), TIMEOUTS.produceMs, `produce ${cIn.id}`);
+  } catch (e) {
+    if (isFatal(e)) { await store.patchCandidate(cIn.id, { status: 'scored', status_reason: `run aborted: ${(e as Error).message.slice(0, 160)}` }); throw e; }
+    await store.patchCandidate(cIn.id, { status: 'failed', status_reason: (e as Error).message.split('\n')[0].slice(0, 300) });
+    log.error(`produce ${cIn.id} failed: ${(e as Error).message.split('\n')[0].slice(0, 300)}`);
+    return null;
+  }
+}
+
+async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, opts: { allowOkTier?: boolean } = {}): Promise<Production | null> {
   let c = cIn;
   const dir = path.join(cfg.workDir, 'jobs', c.id);
   fs.mkdirSync(dir, { recursive: true });
@@ -160,6 +173,7 @@ export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate
     log.info(`produced ${c.id} [${basis}]: "${copy.headline}" (${r.durationSec.toFixed(1)}s)`);
     return prod;
   } catch (e) {
+    if (isFatal(e)) throw e; // budget / breaker: handled by the wrapper, aborts the run
     const msg = (e as Error).message.split('\n')[0].slice(0, 300);
     log.error(`produce ${c.id} failed: ${msg}`);
     await store.patchCandidate(c.id, { status: 'failed', status_reason: msg });
@@ -168,17 +182,35 @@ export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate
 }
 
 /** Score all 'discovered' candidates. Returns count that passed. */
-export async function scoreAll(cfg: Config, store: Store, limit = 200): Promise<number> {
+export interface ScoreStats { attempted: number; scored: number; passed: number; errors: number }
+
+/**
+ * Score 'discovered' candidates. Candidates whose LLM call failed stay 'discovered' with an llm_error reason and are
+ * retried next run; a budget or breaker error aborts the loop (and the command) after storing what was done.
+ */
+export async function scoreAll(cfg: Config, store: Store, limit = 200): Promise<ScoreStats> {
   const weights = await store.weights();
   const cands = await store.listCandidates({ status: ['discovered'], limit });
-  let passed = 0;
+  const stats: ScoreStats = { attempted: 0, scored: 0, passed: 0, errors: 0 };
   for (const c of cands) {
+    stats.attempted++;
     const scored = await scoreCandidate(cfg, c, weights);
     await store.upsertCandidates([scored]);
-    if (scored.status === 'scored') passed++;
+    if (scored.status === 'discovered') stats.errors++; else stats.scored++;
+    if (scored.status === 'scored') stats.passed++;
+    if (stats.errors >= 5 && stats.scored === 0) throw new Error(`scoring: the first ${stats.errors} LLM calls all failed (${scored.status_reason}); stopping before the rest of the list`);
   }
-  log.info(`scored ${cands.length} candidates, ${passed} passed`);
-  return passed;
+  log.info(`scored ${stats.scored}/${stats.attempted} candidates, ${stats.passed} passed, ${stats.errors} LLM errors (left for the next run)`);
+  return stats;
+}
+
+/** Give candidates that were never really scored (LLM error, or the old heuristic-only path) another chance. */
+export async function rescoreUnscored(store: Store): Promise<number> {
+  const all = await store.listCandidates();
+  const stale = all.filter((c) => (c.status === 'rejected_score' || c.status === 'scored') && c.llm_score == null && (!c.status_reason || /^(heuristic_only|llm_error)/.test(c.status_reason)));
+  for (const c of stale) await store.patchCandidate(c.id, { status: 'discovered', status_reason: 'rescore: previous run had no LLM score' });
+  if (stale.length) log.info(`rescore: ${stale.length} candidate(s) returned to 'discovered' (they had no LLM score)`);
+  return stale.length;
 }
 
 /** Produce until we have `target` productions not yet attached to a post. */

@@ -235,13 +235,13 @@ async function redditToken(cfg: Config): Promise<string> {
  * media id; score/comment counts are not included, so a rank-based proxy is stored and the LLM rubric carries the
  * weight. Used automatically when no Reddit app credentials are configured.
  */
-export async function discoverRedditRss(cfg: Config, limit: number, windows: ('day' | 'week' | 'month')[] = cfg.redditWindows): Promise<Candidate[]> {
+export async function discoverRedditRss(cfg: Config, limit: number, windows: ('day' | 'week' | 'month')[] = cfg.redditWindows, subs: typeof REDDIT_SOURCES = REDDIT_SOURCES): Promise<Candidate[]> {
   const now = new Date().toISOString();
   const out: Candidate[] = [];
   const ua = cfg.reddit.userAgent.includes('Mozilla') ? cfg.reddit.userAgent : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
   // two timeframes: top of the day (gaining traction right now) and top of the week/month (proven over a longer window)
   for (const window of windows.length ? windows : ['day' as const]) {
-    for (const { sub, category, guess } of REDDIT_SOURCES) {
+    for (const { sub, category, guess } of subs) {
       let xml: string;
       try {
         const res = await withRetry(`reddit rss r/${sub}`, async () => {
