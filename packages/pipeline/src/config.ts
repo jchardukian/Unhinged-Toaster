@@ -86,9 +86,9 @@ export function loadConfig(): Config {
   const e = process.env;
   const root = repoRoot();
   return {
-    llmProvider: (e.LLM_PROVIDER as 'openai' | 'anthropic') ?? (e.ANTHROPIC_API_KEY && !e.OPENAI_API_KEY ? 'anthropic' : 'openai'),
-    llmModel: e.LLM_MODEL ?? (e.LLM_PROVIDER === 'anthropic' ? 'claude-haiku-5-5' : 'gpt-4o-mini'),
-    visionOcrModel: e.VISION_OCR_MODEL ?? (e.LLM_PROVIDER === 'anthropic' ? 'claude-sonnet-5-5' : 'gpt-4o'),
+    llmProvider: (e.LLM_PROVIDER === 'anthropic' ? 'anthropic' : 'openai'),
+    llmModel: e.LLM_MODEL?.trim() || (e.LLM_PROVIDER === 'anthropic' ? 'claude-haiku-5-5' : 'gpt-4o-mini'),
+    visionOcrModel: e.VISION_OCR_MODEL?.trim() || (e.LLM_PROVIDER === 'anthropic' ? 'claude-sonnet-5-5' : 'gpt-4o'),
     openaiKey: e.OPENAI_API_KEY,
     anthropicKey: e.ANTHROPIC_API_KEY,
     transcribeModel: e.TRANSCRIBE_MODEL ?? 'whisper-1',
