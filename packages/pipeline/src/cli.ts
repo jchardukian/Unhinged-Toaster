@@ -144,7 +144,8 @@ async function main() {
         await alert('info', `Weekly batch ${report.week} complete: ${report.videos_ready} videos / ${report.funnel.drafts_created} drafts waiting for your approval in Buffer`, markdown);
       } else {
         await alert('error', `Weekly batch ${report.week} INCOMPLETE: ${report.videos_ready}/${report.target_videos} videos, ${report.videos_missing} missing`, markdown, { issueKey: `readiness ${report.week}` });
-        if (!flags['allow-incomplete']) process.exitCode = 1;
+        // A dry run validates discovery/scoring without drafting posts; incomplete slots are diagnostic, not a failed launch.
+        if (!dryRun && !flags['allow-incomplete']) process.exitCode = 1;
       }
       return;
     }
