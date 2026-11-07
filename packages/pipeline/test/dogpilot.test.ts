@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { creditText, initialRights } from '@toaster/shared';
 import { assertVideoBudget, setVideoBudget, VideoBudgetExceededError } from '../src/guard.js';
 import { currentUsage, recordVideoGen, recordVideoOutcome, costOf } from '../src/usage.js';
@@ -81,16 +82,25 @@ test('ranking segment length keeps 3–5 clips under 40 s with 4–9 s each', ()
   for (const n of [3, 4, 5]) assert.ok(segmentSeconds(n) * n <= RANKING_MAX_SEC);
 });
 
-test('sfx: synthesised library is created once and cues land on real beats of the edited timeline', async () => {
+test('sfx: placeholders stay in the work dir and cues land on real beats of the edited timeline', async () => {
   const assetsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toaster-sfx-'));
   const c = { assetsDir, workDir: path.join(assetsDir, 'work') } as Config;
   process.env.SFX_PROVIDER = 'synth';
-  const first = await ensureSfxLibrary(c, 'synth');
+  let hasFfmpeg = true;
+  try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch { hasFfmpeg = false; }
+  if (hasFfmpeg) {
+    const first = await ensureSfxLibrary(c, 'synth');
+    assert.equal(first.created, SFX_LIBRARY.length);
+    const second = await ensureSfxLibrary(c, 'synth');
+    assert.equal(second.created, 0, 'idempotent');
+  } else {
+    // CI's unit-test job has no ffmpeg: write the manifest the synthesiser would have written
+    const dir = path.join(c.workDir, 'sfx'); fs.mkdirSync(dir, { recursive: true });
+    for (const e of SFX_LIBRARY) fs.writeFileSync(path.join(dir, `${e.name}.mp3`), '');
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ effects: SFX_LIBRARY.map((e) => ({ name: e.name, file: `${e.name}.mp3`, license: 'synthesised placeholder', source: 'synth' })) }));
+  }
   assert.ok(!fs.existsSync(path.join(assetsDir, 'sfx')), 'placeholders never land in assets/');
   assert.ok(fs.existsSync(path.join(c.workDir, 'sfx', 'manifest.json')));
-  assert.equal(first.created, SFX_LIBRARY.length);
-  const second = await ensureSfxLibrary(c, 'synth');
-  assert.equal(second.created, 0, 'idempotent');
   const cues = planSfx(c, { freeze: { at: 4.0, duration: 0.7, text: 'WAIT' }, punchIn: { at: 4.7, zoom: 1.1, duration: 2 }, replay: { from: 4.2, to: 5.0, speed: 0.5 }, sticker: null, muteSource: false } as never, (t) => t + 0.7, { category: 'funny_animals' });
   const names = cues.map((x) => path.basename(x.path, '.mp3'));
   assert.deepEqual(names, ['record_scratch', 'boing', 'whoosh']);
