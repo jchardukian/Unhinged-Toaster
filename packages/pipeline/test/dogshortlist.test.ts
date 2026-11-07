@@ -9,16 +9,17 @@ test('judgeDog accepts a clear single-clip dog payoff and rejects compilations, 
   const ok = judgeDog(good);
   assert.equal(ok.accepted, true);
   assert.ok(ok.comedy >= COMEDY_THRESHOLD, `comedy ${ok.comedy}`);
-  assert.deepEqual(judgeDog({ ...good, single_clip: false }).reasons, ['compilation_or_multi_clip']);
-  assert.deepEqual(judgeDog({ ...good, payoff: 3 }).reasons.filter((r) => !r.startsWith('comedy')), ['no_clear_payoff']);
-  assert.deepEqual(judgeDog({ ...good, quality: 2 }).reasons, ['low_quality_footage']);
-  assert.deepEqual(judgeDog({ ...good, ai_generated_suspected: true }).reasons, ['ai_generated_suspected']);
-  assert.deepEqual(judgeDog({ ...good, is_dog_comedy: false }).reasons, ['not_dog_comedy']);
+  assert.deepEqual(judgeDog({ ...good, single_clip: false }).hard, ['compilation_or_multi_clip']);
+  const weak = judgeDog({ ...good, payoff: 2 });
+  assert.deepEqual(weak.hard, []); assert.ok(weak.soft.includes('no_clear_payoff'), 'weak payoff is a soft flag: ranked but flagged');
+  assert.deepEqual(judgeDog({ ...good, quality: 2 }).hard, ['low_quality_footage']);
+  assert.deepEqual(judgeDog({ ...good, ai_generated_suspected: true }).hard, ['ai_generated_suspected']);
+  assert.deepEqual(judgeDog({ ...good, is_dog_comedy: false }).hard, ['not_dog_comedy']);
   const cruel = judgeDog({ ...good, safety_flags: ['animal_cruelty'] });
-  assert.equal(cruel.comedy, 0); assert.equal(cruel.accepted, false); assert.equal(cruel.reasons[0], 'safety:animal_cruelty');
-  // cute but no joke: payoff passes the hard bar yet the blended comedy score falls short
-  const meh = judgeDog({ ...good, funny: 4, payoff: 5, clarity: 6, originality: 3 });
-  assert.equal(meh.accepted, false); assert.match(meh.reasons.join(' '), /comedy \d+(\.\d+)? < 60/);
+  assert.equal(cruel.comedy, 0); assert.equal(cruel.accepted, false); assert.equal(cruel.hard[0], 'safety:animal_cruelty');
+  // cute but no joke: payoff passes the bar yet the blended comedy score falls short (soft)
+  const meh = judgeDog({ ...good, funny: 3, payoff: 4, clarity: 5, originality: 3 });
+  assert.equal(meh.accepted, false); assert.deepEqual(meh.hard, []); assert.match(meh.soft.join(' '), /comedy \d+(\.\d+)? < 50/);
   // soft flags cost points but do not block
   assert.equal(judgeDog({ ...good, safety_flags: ['copyrighted_music'] }).comedy, judgeDog(good).comedy - 6);
 });

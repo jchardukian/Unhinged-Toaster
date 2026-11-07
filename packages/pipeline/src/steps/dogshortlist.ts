@@ -28,7 +28,8 @@ const execFileP = promisify(execFile);
  */
 export const MIN_VERIFIED_VIEWS = 1_000_000;
 export const SHELF_PREFILTER_VIEWS = 900_000;       // shelf counts are rounded ("1M views"): verify everything near the bar
-export const COMEDY_THRESHOLD = 60;                 // 0-100, from the dog rubric below
+export const COMEDY_THRESHOLD = 50;                 // 0-100, from the dog rubric below (gpt-4o-mini scores proven 20M-view virals 45-56)
+export const PAYOFF_BAR = 4;                        // rubric payoff below this = no clear comedic payoff
 export const DOG_MIN_SEC = 4, DOG_MAX_SEC = 58;
 export const FRAME_DUP_HAMMING = 8;                 // single-frame perceptual hash distance treated as the same footage
 const MAX_TIKTOK_HANDLES = 12;
@@ -38,22 +39,28 @@ export interface DogRubric {
   ai_generated_suspected?: boolean; funniest_moment?: string | null; visual_summary?: string | null; safety_flags: string[];
   copyright_risk?: string; copyright_risk_reasons?: string[]; detected_handle?: string | null; detected_platform?: string | null; rationale?: string;
 }
-export interface DogJudgement { comedy: number; accepted: boolean; reasons: string[] }
+/**
+ * hard reasons exclude a clip from the shortlist entirely (safety, not a dog, compilation, low quality, AI fake);
+ * soft reasons (weak payoff, comedy below the bar) keep it ranked but flagged, so the owner always sees the strongest N.
+ */
+export interface DogJudgement { comedy: number; accepted: boolean; reasons: string[]; hard: string[]; soft: string[] }
 
 /** Pure decision rule: comedy score 0-100 plus accept / reject reasons. Rejects compilations, no payoff, low quality, AI fakes, safety blocks. */
 export function judgeDog(r: DogRubric): DogJudgement {
-  const reasons: string[] = [];
-  const hard = r.safety_flags.find((f) => HARD_BLOCK_FLAGS.has(f));
-  if (hard) reasons.push(`safety:${hard}`);
-  if (!r.is_dog_comedy) reasons.push('not_dog_comedy');
-  if (!r.single_clip) reasons.push('compilation_or_multi_clip');
-  if (r.payoff < 5) reasons.push('no_clear_payoff');
-  if (r.quality < 4) reasons.push('low_quality_footage');
-  if (r.ai_generated_suspected) reasons.push('ai_generated_suspected');
-  const soft = r.safety_flags.filter((f) => SOFT_FLAGS.has(f)).length;
-  const comedy = hard ? 0 : round1(clamp((r.funny * 0.4 + r.payoff * 0.3 + r.clarity * 0.15 + r.originality * 0.15) * 10 - soft * 6, 0, 100));
-  if (!hard && comedy < COMEDY_THRESHOLD) reasons.push(`comedy ${comedy} < ${COMEDY_THRESHOLD}`);
-  return { comedy, accepted: reasons.length === 0, reasons };
+  const hardReasons: string[] = [];
+  const soft: string[] = [];
+  const hardFlag = r.safety_flags.find((f) => HARD_BLOCK_FLAGS.has(f));
+  if (hardFlag) hardReasons.push(`safety:${hardFlag}`);
+  if (!r.is_dog_comedy) hardReasons.push('not_dog_comedy');
+  if (!r.single_clip) hardReasons.push('compilation_or_multi_clip');
+  if (r.quality < 4) hardReasons.push('low_quality_footage');
+  if (r.ai_generated_suspected) hardReasons.push('ai_generated_suspected');
+  if (r.payoff < PAYOFF_BAR) soft.push('no_clear_payoff');
+  const softFlags = r.safety_flags.filter((f) => SOFT_FLAGS.has(f)).length;
+  const comedy = hardFlag ? 0 : round1(clamp((r.funny * 0.4 + r.payoff * 0.3 + r.clarity * 0.15 + r.originality * 0.15) * 10 - softFlags * 6, 0, 100));
+  if (!hardFlag && comedy < COMEDY_THRESHOLD) soft.push(`comedy ${comedy} < ${COMEDY_THRESHOLD}`);
+  const reasons = [...hardReasons, ...soft];
+  return { comedy, accepted: reasons.length === 0, reasons, hard: hardReasons, soft };
 }
 
 /** Pure: 0-100 from views per hour on a log scale (100/h -> 40, 1k/h -> 60, 10k/h -> 80, 100k/h -> 100); null when unknown. */
@@ -72,6 +79,10 @@ export interface ShortlistRow {
   duration_sec: number | null; comedy: number; rank_score: number; rights_status: string; rights_label: string; copyright_risk: CopyrightRisk | null;
   funniest_moment: string | null; visual_summary: string | null; rationale: string | null; detected_handle: string | null; detected_platform: string | null;
   frames: string[]; phash: string[]; accepted: boolean; reasons: string[]; via: string;
+  /** rubric scores 0-10 (funny, payoff, clarity, originality, quality) for calibration */
+  rubric?: { funny: number; payoff: number; clarity: number; originality: number; quality: number } | null;
+  /** 'pass' when every gate passed, else the soft reasons (weak payoff / comedy below bar); hard-rejected rows never reach the shortlist */
+  gate?: string;
 }
 
 /** Pure: same footage already kept? (same URL, near-identical frames, or same title with the same length). */
@@ -269,7 +280,9 @@ export async function runDogShortlist(cfg: Config, o: ShortlistOptions): Promise
       views_per_hour: c.engagement_velocity, published_at: c.published_at, duration_sec: c.duration_sec, comedy, rank_score: rankScore(comedy, c.engagement_velocity),
       rights_status: c.rights_status, rights_label: rightsLabel(withRisk, cfg.maxCopyrightRisk), copyright_risk: risk,
       funniest_moment: rubric?.funniest_moment ?? null, visual_summary: rubric?.visual_summary ?? null, rationale: rubric?.rationale ?? null,
-      detected_handle: rubric?.detected_handle ?? null, detected_platform: rubric?.detected_platform ?? null, frames: [], phash: [], accepted: j?.accepted ?? false, reasons: j?.reasons ?? [], via, ...extra,
+      detected_handle: rubric?.detected_handle ?? null, detected_platform: rubric?.detected_platform ?? null, frames: [], phash: [], accepted: j?.accepted ?? false, reasons: j?.reasons ?? [], via,
+      rubric: rubric ? { funny: rubric.funny, payoff: rubric.payoff, clarity: rubric.clarity, originality: rubric.originality, quality: rubric.quality } : null,
+      gate: j ? (j.accepted ? 'pass' : j.hard.length ? `rejected: ${j.hard.join(', ')}` : `flagged: ${j.soft.join(', ')}`) : 'not scored', ...extra,
     };
   };
   const judgeAndKeep = async (c: Candidate, verified: string, via: string, sheet: { sheet: string; frames: string[] } | null) => {
@@ -277,16 +290,19 @@ export async function runDogShortlist(cfg: Config, o: ShortlistOptions): Promise
     for (const f of sheet?.frames ?? []) { const h = await imagePhash(f); if (h) phashes.push(h); }
     const dupKey = { url: c.source_url, title: c.title, duration_sec: c.duration_sec, phash: phashes };
     const dup = isDuplicateRow(dupKey, [...kept, ...rejected]);
-    if (dup) { counts.duplicates++; rejected.push(toRow(c, null, { comedy: 0, accepted: false, reasons: [`duplicate:${dup}`] }, { frames: sheet?.frames ?? [], phash: phashes }, verified, via)); return; }
+    if (dup) { counts.duplicates++; rejected.push(toRow(c, null, { comedy: 0, accepted: false, reasons: [`duplicate:${dup}`], hard: [`duplicate:${dup}`], soft: [] }, { frames: sheet?.frames ?? [], phash: phashes }, verified, via)); return; }
     let rubric: DogRubric;
     try { rubric = await scoreDogCandidate(cfg, c, sheet ? fs.readFileSync(sheet.sheet).toString('base64') : undefined); }
-    catch (e) { if (isFatal(e)) throw e; log.warn(`dog scoring failed for ${c.source_url}: ${(e as Error).message.slice(0, 160)}`); rejected.push(toRow(c, null, { comedy: 0, accepted: false, reasons: ['llm_error'] }, { frames: sheet?.frames ?? [], phash: phashes }, verified, via)); return; }
+    catch (e) { if (isFatal(e)) throw e; log.warn(`dog scoring failed for ${c.source_url}: ${(e as Error).message.slice(0, 160)}`); rejected.push(toRow(c, null, { comedy: 0, accepted: false, reasons: ["llm_error"], hard: ["llm_error"], soft: [] }, { frames: sheet?.frames ?? [], phash: phashes }, verified, via)); return; }
     counts.scored++;
     const j = judgeDog(rubric);
     if (rubric.detected_handle && rubric.detected_platform === 'tiktok' && isCreatorHandle(rubric.detected_handle, 'tiktok')) learnedHandles.add(rubric.detected_handle);
     const row = toRow(c, rubric, j, { frames: sheet?.frames ?? [], phash: phashes }, verified, via);
-    if (row.rights_label.startsWith('blocked')) { row.accepted = false; row.reasons = [...row.reasons, 'rights_blocked']; }
-    if (row.accepted) { counts.passed_comedy++; kept.push(row); } else { if (j.accepted) counts.passed_comedy++; rejected.push(row); }
+    if (row.rights_label.startsWith('blocked')) { row.accepted = false; row.reasons = [...row.reasons, 'rights_blocked']; row.gate = `rejected: rights_blocked`; }
+    if (j.accepted) counts.passed_comedy++;
+    // ranked candidates: everything not hard-rejected (safety / not a dog / compilation / low quality / AI fake / rights); soft gate failures stay, flagged
+    const rankable = j.hard.length === 0 && !row.rights_label.startsWith('blocked');
+    if (rankable) kept.push(row); else rejected.push(row);
   };
 
   // ---------------- YouTube
@@ -343,12 +359,12 @@ export async function runDogShortlist(cfg: Config, o: ShortlistOptions): Promise
   const cost = costOf(currentUsage());
   const md: string[] = [`## Viral funny-dog shortlist (discovery only; nothing stored, rendered, drafted or published)`, ''];
   md.push(`- videos with >= 1,000,000 VERIFIED views: YouTube ${counts.youtube_1m_verified}, TikTok ${counts.tiktok_1m_verified} (Reddit: ${counts.reddit_candidates} dog clips, views not exposed)`);
-  md.push(`- scored by the dog-comedy rubric: ${counts.scored}; passed (clear payoff, single clip, quality, safety, comedy >= ${COMEDY_THRESHOLD}): ${counts.passed_comedy}; duplicates removed: ${counts.duplicates}`);
-  md.push(`- shortlist (top ${rows.length} of ${kept.length} eligible): rights cleared ${counts.rights_cleared}, review-eligible (no licence on file; owner decides per draft) ${counts.rights_review_eligible}, blocked ${counts.rights_blocked}`);
+  md.push(`- scored by the dog-comedy rubric: ${counts.scored}; passed every gate (clear payoff, single clip, quality, safety, comedy >= ${COMEDY_THRESHOLD}): ${counts.passed_comedy}; duplicates removed: ${counts.duplicates}`);
+  md.push(`- shortlist (top ${rows.length} of ${kept.length} rankable = single real-dog clips that are not compilations, low quality, AI fakes, unsafe or rights-blocked; "gate" shows the ones below the comedy bar): rights cleared ${counts.rights_cleared}, review-eligible (no licence on file; owner decides per draft) ${counts.rights_review_eligible}, blocked ${counts.rights_blocked}`);
   md.push(`- API spend: $${cost.total_usd.toFixed(3)} of the $${budget().toFixed(2)} budget (metered $${spentUsd().toFixed(3)}); elapsed ${Math.round((Date.now() - start) / 1000)} s`, '');
   md.push('### Discovery methods (no paid APIs)', ...methods.map((m) => `- ${m}`), '');
-  md.push(`### Top ${rows.length}`, '', '| # | title | platform | views | url | comedy | dur | rights | views/h | channel | payoff |', '|---|---|---|---|---|---|---|---|---|---|---|');
-  for (const r of rows) md.push(`| ${r.rank} | ${esc(r.title).slice(0, 70)} | ${r.platform} | ${r.views == null ? 'n/a' : r.views.toLocaleString('en-US')} | ${r.url} | ${r.comedy} | ${r.duration_sec ?? '?'} s | ${esc(r.rights_label)} | ${r.views_per_hour == null ? '-' : fmtCount(r.views_per_hour)} | ${esc(r.channel ?? '')} | ${esc(r.funniest_moment ?? '')} |`);
+  md.push(`### Top ${rows.length}`, '', '| # | title | platform | views | url | comedy | gate | dur | rights | views/h | channel | payoff |', '|---|---|---|---|---|---|---|---|---|---|---|---|');
+  for (const r of rows) md.push(`| ${r.rank} | ${esc(r.title).slice(0, 70)} | ${r.platform} | ${r.views == null ? 'n/a' : r.views.toLocaleString('en-US')} | ${r.url} | ${r.comedy} | ${esc(r.gate ?? '')} | ${r.duration_sec ?? '?'} s | ${esc(r.rights_label)} | ${r.views_per_hour == null ? '-' : fmtCount(r.views_per_hour)} | ${esc(r.channel ?? '')} | ${esc(r.funniest_moment ?? '')} |`);
   const why: Record<string, number> = {};
   for (const r of rejected) for (const reason of r.reasons) { const k = reason.split(':')[0].split(' ')[0]; why[k] = (why[k] ?? 0) + 1; }
   md.push('', `### Rejected (${rejected.length}) by reason`, ...Object.entries(why).sort((a, b) => b[1] - a[1]).map(([k, v]) => `- ${k}: ${v}`));

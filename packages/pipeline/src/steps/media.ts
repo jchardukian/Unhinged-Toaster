@@ -211,8 +211,11 @@ export async function ytdlpJson(target: string | string[], opts: { flat?: boolea
   if (opts.embeddedMeta) args.push('--ignore-no-formats-error', '--extractor-args', 'youtube:player_client=web_embedded');
   for (const a of ytdlpCommonArgs(opts.youtube ?? false)) args.push(a);
   args.push(...(Array.isArray(target) ? target : [target]));
-  const { stdout } = await execFileP('yt-dlp', args, { maxBuffer: 64 << 20 }).catch((e: { stdout?: string }) => ({ stdout: e.stdout ?? '' }));
-  return String(stdout).split('\n').filter((l) => l.trim().startsWith('{')).map((l) => { try { return JSON.parse(l) as Record<string, unknown>; } catch { return null; } }).filter((x): x is Record<string, unknown> => !!x);
+  const { stdout, stderr } = await execFileP('yt-dlp', args, { maxBuffer: 64 << 20 }).catch((e: { stdout?: string; stderr?: string }) => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? '' }));
+  const rows = String(stdout).split('\n').filter((l) => l.trim().startsWith('{')).map((l) => { try { return JSON.parse(l) as Record<string, unknown>; } catch { return null; } }).filter((x): x is Record<string, unknown> => !!x);
+  // an empty answer is usually a block (bot wall, geo, rate limit): keep the reason visible in the run log instead of a silent 0
+  if (rows.length === 0 && String(stderr).trim()) log.warn(`yt-dlp returned no rows for ${Array.isArray(target) ? `${target.length} targets` : target}: ${String(stderr).trim().split('\n').slice(-2).join(' / ').slice(0, 300)}`);
+  return rows;
 }
 
 export async function fetchToFile(url: string, file: string, headers: Record<string, string> = {}): Promise<void> {
