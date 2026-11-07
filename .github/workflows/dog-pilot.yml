@@ -73,7 +73,7 @@ jobs:
           TOASTER_API_URL: ${{ vars.TOASTER_API_URL }}
           TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
           CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
-          COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT }}
+          COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT || 'text_only' }}
           MUSIC_DEFAULT: ${{ vars.MUSIC_DEFAULT }}
           WORK_DIR: ./work
         run: node packages/pipeline/dist/cli.js dog-pilot --provider "${{ inputs.provider }}" ${{ inputs.model && format('--model {0}', inputs.model) || '' }} --ai "${{ inputs.ai_count }}" --rankings "${{ inputs.ranking_count }}" --controls "${{ inputs.controls }}" --stock "${{ inputs.stock }}"

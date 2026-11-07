@@ -84,7 +84,7 @@ jobs:
           BUFFER_TAG_REVIEW_ID: ${{ vars.BUFFER_TAG_REVIEW_ID }}
           BUFFER_TAG_CLEARED_ID: ${{ vars.BUFFER_TAG_CLEARED_ID }}
           CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
-          COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT }}
+          COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT || 'text_only' }}
           BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE || 'America/Chicago' }}
           PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS || '11:00,15:00,19:00' }}
           # unattended publishing: OFF unless both variables are set (docs/AUTONOMY.md); EMERGENCY_STOP=true halts it
