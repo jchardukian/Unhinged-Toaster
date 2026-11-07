@@ -1,4 +1,4 @@
-import { costOf, currentUsage } from './usage.js';
+import { costOf, currentUsage, videoGenUsd } from './usage.js';
 
 /**
  * Cost and failure controls shared by every paid call:
@@ -24,7 +24,7 @@ export class FatalApiError extends Error {
 export class StageTimeoutError extends Error {
   constructor(label: string, ms: number) { super(`${label} exceeded its ${Math.round(ms / 1000)} s time limit`); this.name = 'StageTimeoutError'; }
 }
-export const isFatal = (e: unknown): boolean => e instanceof BudgetExceededError || e instanceof FatalApiError;
+export const isFatal = (e: unknown): boolean => e instanceof BudgetExceededError || e instanceof FatalApiError || (e instanceof Error && e.name === 'VideoBudgetExceededError');
 
 let budgetUsd = Number(process.env.API_BUDGET_USD) > 0 ? Number(process.env.API_BUDGET_USD) : 2;
 export function setBudget(usd: number): void { budgetUsd = usd; }
@@ -34,6 +34,24 @@ export function spentUsd(): number { return costOf(currentUsage()).total_usd; }
 export function assertBudget(label: string): void {
   const spent = spentUsd();
   if (spent >= budgetUsd) throw new BudgetExceededError(spent, budgetUsd, label);
+}
+
+/**
+ * AI video generation has its own HARD cap (AI_VIDEO_BUDGET_USD, default $25). It is checked with the cost of the
+ * NEXT attempt included, is never raised by code, and exhausting it ends the pilot with a report, not a retry.
+ */
+let videoBudgetUsd = Number(process.env.AI_VIDEO_BUDGET_USD) > 0 ? Number(process.env.AI_VIDEO_BUDGET_USD) : 25;
+export function videoBudget(): number { return videoBudgetUsd; }
+export function setVideoBudget(usd: number): void { videoBudgetUsd = usd; }
+export class VideoBudgetExceededError extends Error {
+  constructor(public readonly spentUsd: number, public readonly nextUsd: number, public readonly budgetUsd: number) {
+    super(`AI video budget: $${spentUsd.toFixed(2)} spent, next attempt $${nextUsd.toFixed(2)} would exceed the $${budgetUsd.toFixed(2)} hard cap. Stopping; not raising the cap automatically.`);
+    this.name = 'VideoBudgetExceededError';
+  }
+}
+export function assertVideoBudget(nextAttemptUsd: number): void {
+  const spent = videoGenUsd();
+  if (spent + nextAttemptUsd > videoBudgetUsd) throw new VideoBudgetExceededError(spent, nextAttemptUsd, videoBudgetUsd);
 }
 
 const PERSISTENT = new Set([400, 401, 403]);

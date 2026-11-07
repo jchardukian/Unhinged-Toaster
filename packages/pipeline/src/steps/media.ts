@@ -73,8 +73,13 @@ export async function downloadMedia(c: Candidate, dir: string): Promise<string> 
     case 'reddit': return downloadReddit(c, out);
     case 'youtube': return downloadWithYtDlp(c.source_url, out, { youtube: true });
     case 'tiktok': return downloadWithYtDlp(c.source_url, out, {});
+    case 'ai_generated': {
+      if (fs.existsSync(out)) return out; // generated straight into the job folder by steps/aivideo.ts
+      throw new Error('ai_generated clip file missing (generation output was not kept)');
+    }
     default:
       if (!c.media_url) throw new Error('no media_url');
+      if (c.media_url.startsWith('file://')) { fs.copyFileSync(c.media_url.slice(7), out); return out; }
       await fetchToFile(c.media_url, out);
       return out;
   }

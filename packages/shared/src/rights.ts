@@ -56,8 +56,23 @@ export const DEFAULT_CONTACT_EMAIL = 'theunhingedtoaster@gmail.com';
  * PUBLIC credit block appended to every description. Creator name/handle when identifiable, source URL, what we
  * changed, and the contact address. It deliberately makes no claim of authorisation or fair use.
  */
-export function creditText(c: Pick<Candidate, 'author' | 'source_url' | 'rights_basis' | 'source_platform'> & Partial<Pick<Candidate, 'detected_handle' | 'detected_platform'>>, opts: { contactEmail?: string; editsSummary?: string } = {}): string {
+export function creditText(c: Pick<Candidate, 'author' | 'source_url' | 'rights_basis' | 'source_platform'> & Partial<Pick<Candidate, 'detected_handle' | 'detected_platform' | 'meta_json'>>, opts: { contactEmail?: string; editsSummary?: string } = {}): string {
   const email = opts.contactEmail ?? DEFAULT_CONTACT_EMAIL;
+  if (c.source_platform === 'ai_generated' || c.rights_basis === 'ai_generated') {
+    return [
+      '🤖 This video is AI-generated (synthetic footage created for The Unhinged Toaster). No real dog was filmed.',
+      `✂️ Edited by The Unhinged Toaster: ${opts.editsSummary ?? 'comedic sound design, captions and animated visuals'}.`,
+      `📩 Questions or removal requests: ${email}`,
+    ].join('\n');
+  }
+  const ranking = rankingClips(c.meta_json);
+  if (ranking) {
+    const lines = ['🎬 Clips in this ranking:'];
+    ranking.forEach((k, i) => lines.push(`  ${ranking.length - i}. ${k.author ? `${k.author} — ` : ''}${k.source_url}${k.license ? ` (${k.license})` : ''}`));
+    lines.push(`✂️ Edited by The Unhinged Toaster: ${opts.editsSummary ?? 'ranking, captions, comedic sound design and animated visuals'}.`);
+    lines.push(`📩 Copyright inquiries, credit corrections or removal requests: ${email}`);
+    return lines.join('\n');
+  }
   const who = c.author ? displayHandle(c.author, c.source_platform) : 'original creator (uncredited – contact us to be credited)';
   const visible = c.detected_handle ? `@${c.detected_handle.replace(/^@/, '')}${c.detected_platform ? ` on ${capitalize(c.detected_platform)}` : ''}` : null;
   const lines = [
@@ -77,6 +92,13 @@ export function creditText(c: Pick<Candidate, 'author' | 'source_url' | 'rights_
   }
   lines.push(`📩 Copyright inquiries, credit corrections or removal requests: ${email}`);
   return lines.join('\n');
+}
+
+/** Clip list stored on a ranking candidate (meta_json.clips). */
+export interface RankingClip { candidate_id: string; source_url: string; author: string | null; license: string | null; platform: string }
+export function rankingClips(metaJson: string | null | undefined): RankingClip[] | null {
+  if (!metaJson) return null;
+  try { const m = JSON.parse(metaJson) as { clips?: RankingClip[] }; return Array.isArray(m.clips) && m.clips.length ? m.clips : null; } catch { return null; }
 }
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -154,6 +176,10 @@ export function initialRights(platform: SourcePlatform, meta: RightsMeta): Pick<
       return { rights_status: 'cleared', rights_basis: 'pixabay_license', rights_evidence: `https://pixabay.com/service/license-summary/${meta.evidenceSuffix ?? ''}`, rights_notes: 'Pixabay Content License: commercial use OK, no attribution required, must be transformed (we add template/captions/commentary); no unmodified redistribution.' };
     case 'licensed_library':
       return { rights_status: 'cleared', rights_basis: 'licensed', rights_evidence: meta.license ?? 'license id missing', rights_notes: null };
+    case 'ai_generated':
+      // provider terms disclaim ownership of outputs (Google Gemini API terms: "Google won't claim ownership over that content";
+      // Runway terms §4.4: "does not claim ownership of any of your Inputs or Outputs ... does not restrict your commercial use")
+      return { rights_status: 'cleared', rights_basis: 'ai_generated', rights_evidence: meta.evidenceSuffix ?? 'ai provider job id missing', rights_notes: 'Synthetic footage generated for this channel; disclosed as AI-generated in the description.' };
     case 'tiktok':
       return { rights_status: 'transformation_review', rights_basis: null, rights_evidence: null, rights_notes: 'TikTok user upload, no reuse license on file. Eligible for transformation review only (owner decides per draft). Creator handle credited.' };
     case 'reddit':

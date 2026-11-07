@@ -32,6 +32,8 @@ export interface RenderJob {
   outPath: string;
   workDir: string;
   timeline?: EditTimeline;        // clip-specific comedic edit plan (optional: plain template when absent)
+  /** comedic sound effects, placed on the EDITED timeline (seconds), mixed over everything else */
+  sfx?: { path: string; at: number; gain?: number }[];
 }
 
 export interface RenderResult { outPath: string; durationSec: number; thumbnailPath: string; command: string[]; editedClipSec: number }
@@ -140,6 +142,8 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const iWordmark = fs.existsSync(wordmarkPath) ? add('-loop', '1', '-i', wordmarkPath) : -1;
   const iVo = useVo ? add('-i', job.voPath!) : -1;
   const iMusic = job.musicPath ? add('-stream_loop', '-1', '-i', job.musicPath) : -1;
+  const sfxList = (job.sfx ?? []).filter((x) => fs.existsSync(x.path) && x.at >= 0);
+  const iSfx = sfxList.map((x) => add('-i', x.path));
 
   // ---------- captions file (source time -> edited time; drop words inside the replay since it is a repeat)
   let assFile: string | null = null;
@@ -324,6 +328,10 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     aParts.push(`[${iMusic}:a]aresample=48000,atrim=0:${total.toFixed(2)},afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, total - 1.2).toFixed(2)}:d=1.2,volume=${t.audio.musicVolume}${musicDuck}[mus]`);
     mixIn.push('[mus]');
   }
+  sfxList.forEach((x, n) => {
+    aParts.push(`[${iSfx[n]}:a]aresample=48000,aformat=channel_layouts=stereo,volume=${(x.gain ?? 0.9).toFixed(2)},adelay=${Math.round(x.at * 1000)}:all=1[sfx${n}]`);
+    mixIn.push(`[sfx${n}]`);
+  });
   aParts.push(`${mixIn.join('')}amix=inputs=${mixIn.length}:duration=longest:normalize=0,loudnorm=${t.audio.loudnorm},alimiter=limit=0.95[aout]`);
   f.push(...aParts);
 

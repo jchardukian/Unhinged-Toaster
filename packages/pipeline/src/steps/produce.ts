@@ -13,7 +13,7 @@ import { scoreCandidate } from './score.js';
 import { synthesiseCommentary } from './tts.js';
 import { uploadPublic } from './upload.js';
 import { withRetry } from '../retry.js';
-import { recordRender, recordUpload } from '../usage.js';
+import { costOf, currentUsage, recordRender, recordUpload } from '../usage.js';
 import { assertBudget, isFatal, TIMEOUTS, withTimeout } from '../guard.js';
 
 /**
@@ -42,6 +42,7 @@ export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate
 
 async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, opts: { allowOkTier?: boolean } = {}): Promise<Production | null> {
   let c = cIn;
+  const costAtStart = costOf(currentUsage()).total_usd;
   const dir = path.join(cfg.workDir, 'jobs', c.id);
   fs.mkdirSync(dir, { recursive: true });
   const now = () => new Date().toISOString();
@@ -166,6 +167,8 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
       render_log: JSON.stringify({ transcriptWords: transcript?.words.length ?? 0, vo: !!vo, commentaryMode, peak: analysis.peak, dropped: timeline.dropped, cmd: r.command.slice(0, 12) }),
       reuse_basis: basis,
       edit_plan: JSON.stringify(timeline.beats),
+      content_format: c.content_format ?? 'general_viral',
+      production_cost_usd: Math.round((costOf(currentUsage()).total_usd - costAtStart) * 10000) / 10000,
       created_at: now(), updated_at: now(),
     };
     await store.upsertProduction(prod);

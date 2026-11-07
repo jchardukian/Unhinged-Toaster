@@ -1,7 +1,17 @@
 # Funny-dog expansion: findings and pilot design (2026-11-07)
 
-Status: research and design only. No provider account, no paid generation, no dog content published, production
-schedule untouched.
+Status (2026-11-07): **pilot implemented** (opt-in `dog-pilot` command + "Dog pilot" workflow), exercised end to end with
+the free mock provider and mock stock; no provider account, no paid generation, no dog content published, production
+schedules untouched. Owner credentials needed before paid runs are listed at the end of docs/DEPLOYMENT.md.
+
+Implemented pieces: `steps/aivideo.ts` (Gemini Omni 1.2 Flash, Runway kling_4_flash / gen4.5 / veo3.1_fast, mock) behind one
+`VideoProvider` interface with a HARD `AI_VIDEO_BUDGET_USD` cap; `steps/dogprompts.ts` (20 premises, realism constraints,
+LLM variation); `steps/dogquality.ts` (vision gate: anatomy, motion, lighting, artifacts, 2-s hook, payoff, SFX fit;
+strict pure decision rule); `steps/sfx.ts` (10-effect library, ElevenLabs sound-generation or free placeholders kept out of
+assets/, cues on real beats) + an SFX bus in `render.ts`; `steps/ranking.ts` (3–5 licensed clips, badges, labels,
+cross-fades, cut whooshes, #1 fanfare, then the normal branded render); `steps/dogpilot.ts` (orchestrator, cost per
+ACCEPTED video, shortages reported not filled, report + contact sheet); `content_format` on candidates/productions/posts
+(migration 0006) with a per-format table in the readiness report.
 
 ## 1. What exists and what a dog pilot can reuse
 

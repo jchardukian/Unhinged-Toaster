@@ -100,3 +100,15 @@ Optional (Actions **variables**, not secrets): `ELEVENLABS_VOICE_ID`, `BUFFER_TA
 API $0.039 per Short → about $1/week, $4–8/month including daily discovery; GitHub Actions ≈ 75 min per weekly batch plus
 15–45 min per daily run (free for a public repository; 2 000 free minutes/month for a private one); R2 ≈ 0.7 GB/week
 (10 GB free); Cloudflare Workers/D1 free tier; Buffer existing plan; Reddit free.
+
+## Dog pilot credentials (only when you want paid generation or live stock)
+
+| Secret | Needed for | Where |
+|---|---|---|
+| `GEMINI_API_KEY` | AI dog clips with Google `gemini-omni-1.2-flash` (≈ $0.07 per 720p second; the pilot's $25 cap ≈ 30 attempts of 12 s) | aistudio.google.com → Get API key; enable billing on the Google Cloud project (video is paid-tier only) |
+| `RUNWAY_API_KEY` | AI dog clips with Runway (`kling_4_flash` ≈ $0.094/s, `gen4.5` $0.12/s, `veo3.1_fast` $0.15/s) | dev.runwayml.com → API keys; buy credits ($0.01 each, no subscription; $15 covers the benchmark) |
+| `PEXELS_API_KEY`, `PIXABAY_API_KEY` | real-dog rankings from licensed stock | pexels.com/api and pixabay.com/api (free, instant) |
+| variable `SFX_PROVIDER=elevenlabs` | build the real sound-effects library once with the ElevenLabs key already in use | Settings → Variables |
+
+One AI provider key is enough to start: the workflow's `provider` input selects it. Nothing here is required for the
+existing general-viral production.

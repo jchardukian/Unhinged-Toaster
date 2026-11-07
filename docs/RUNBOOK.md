@@ -86,6 +86,17 @@ two consecutive 400/401/403 answers from a service stop the run immediately (cir
 same error for every candidate. Spend is metered (`API_BUDGET_USD`, production default $15 weekly / $8 daily; set the
 repository variable to change it) and reported at the end of every run together with elapsed time.
 
+## Dog-content pilot (opt-in, manual, never publishes)
+
+GitHub → Actions → "Dog pilot (opt-in, never publishes)" → Run workflow. Inputs: `provider` (mock = free synthetic
+clips; gemini / runway need a key), `ai_count`, `ranking_count`, `controls`, `ai_video_budget` (HARD cap, default $25,
+never raised by code), `stock` (live = Pexels/Pixabay keys; mock = synthetic). The run writes `dog-pilot-report.md`
+(per video: format, attempts, rejections, cost per accepted video, quality scores, rights) plus a contact sheet and the
+finished mp4s as artifacts. It creates no Buffer posts; the general daily/weekly schedules are untouched.
+Rankings use licensed stock only; when fewer than 3 funny licensed clips exist the shortage is reported, not filled.
+Sound effects: set repository variable `SFX_PROVIDER=elevenlabs` to build the real library once (10 effects, ~2,000
+ElevenLabs credits, inside the free tier); otherwise free placeholders are used and clearly labelled.
+
 ## Weekly operation
 - Sunday morning: read the readiness report (weekly run summary or `GET <worker>/weeks/next/report?format=md`): it lists which drafts are transformation-review (source, creator, copyright risk) and which have an explicit basis. Then open Buffer → Drafts (review drafts carry the REVIEW tag when configured). Approve ("Add to queue" or "Schedule") or delete. Captions are already public-ready: creator credit, source link, edit summary, contact e-mail.
 - Nothing else. A deletion is confirmed after two polls ≥ 10 min apart, then a replacement is rendered and drafted into the same slot (Worker: ~30–60 min; Actions fallback: ~2–4 h). Replacements are new drafts, so they appear in the Drafts tab for your next look.

@@ -1,4 +1,5 @@
 import type { Candidate, Production, ScheduledPost, SlotPlan } from './types.js';
+import { formatPerformance, formatPerformanceMarkdown, type FormatStats } from './formats.js';
 
 /** Weekly readiness report. Pure function over store snapshots so it is identical in the CLI and the Worker. */
 export interface ReadinessReport {
@@ -27,6 +28,7 @@ export interface ReadinessReport {
   review_items: ReviewItem[];
   /** Drafts with an explicit basis, for completeness. */
   cleared_items: { headline: string; basis: string; source_url: string }[];
+  by_format?: FormatStats[];
   shortage_reasons: Record<string, number>;
   blockers: string[];
   complete: boolean;
@@ -49,6 +51,7 @@ export function buildReadinessReport(input: {
   candidates: Candidate[];
   productions: Production[];
   posts: ScheduledPost[];        // posts for plan.week
+  allPosts?: ScheduledPost[];    // every post, for the per-format performance table
   now?: Date;
 }): ReadinessReport {
   const { plan, candidates, productions } = input;
@@ -142,6 +145,7 @@ export function buildReadinessReport(input: {
     missing_slots,
     review_items,
     cleared_items,
+    by_format: input.allPosts ? formatPerformance(input.allPosts, productions, input.now ?? new Date()) : undefined,
     shortage_reasons: reasons,
     blockers,
     complete: videosMissing === 0 && missing_slots.length === 0,
@@ -193,5 +197,6 @@ export function formatReadinessMarkdown(r: ReadinessReport): string {
     lines.push('', `**Unfilled slots** (first ${Math.min(10, r.missing_slots.length)})`);
     for (const s of r.missing_slots.slice(0, 10)) lines.push(`- ${s.slot_at} ${s.service}`);
   }
+  if (r.by_format && r.by_format.some((f) => f.videos || f.posts_sent)) lines.push(...formatPerformanceMarkdown(r.by_format));
   return lines.join('\n');
 }

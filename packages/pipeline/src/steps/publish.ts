@@ -90,7 +90,7 @@ export async function publishWeek(cfg: Config, store: Store, opts: PublishOption
       for (const service of services) {
         const key = `${plan.week}|${slotAt}|${service}`;
         const row: ScheduledPost = retryRows.get(`${slotAt}|${service}`) ?? {
-          id: ulid(), production_id: prod.id, candidate_id: prod.candidate_id, service, buffer_channel_id: channelFor(cfg, service),
+          id: ulid(), production_id: prod.id, candidate_id: prod.candidate_id, content_format: prod.content_format ?? 'general_viral', service, buffer_channel_id: channelFor(cfg, service),
           buffer_post_id: null, slot_at: slotAt, batch_week: plan.week, state: cfg.approvalMode === 'needs_approval' ? 'needs_approval' : 'draft',
           last_synced_at: null, buffer_error: null, views: null, likes: null, comments: null, shares: null, metrics_updated_at: null,
           created_at: now().toISOString(), updated_at: now().toISOString(), idempotency_key: key, create_attempts: 0, missing_count: 0, missing_since: null, sync_error: null,

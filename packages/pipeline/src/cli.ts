@@ -10,6 +10,8 @@ import { discoverAll, youtubeFetchGuard } from './steps/discover.js';
 import { produceCandidate, produceUntil, rescoreUnscored, scoreAll } from './steps/produce.js';
 import { runPreflight } from './steps/preflight.js';
 import { runPilot, runSmoke, writeSummary } from './steps/ladder.js';
+import { runDogPilot } from './steps/dogpilot.js';
+import { ensureSfxLibrary } from './steps/sfx.js';
 import { budget, isFatal, setBudget, spentUsd } from './guard.js';
 import { publishWeek } from './steps/publish.js';
 import { readinessReport } from './steps/report.js';
@@ -24,6 +26,10 @@ Testing ladder (cheap first; API_BUDGET_USD caps spend, default $2)
   preflight [--mode production|diagnostic]   config + one scoring call + Worker + Buffer (read-only) + voices + feed; exit 1 if blocked
   smoke                     2 feeds -> score <= 5 -> render exactly 1 -> verify the public URL plays; no Buffer posts
   pilot [--drafts]          3 distinct Shorts; Buffer DRAFTS only with --drafts (owner still approves)
+
+Dog-content pilot (opt-in, manual, never publishes; AI_VIDEO_BUDGET_USD hard cap, default $25)
+  dog-pilot [--provider gemini|runway|mock] [--model ID] [--ai 4] [--rankings 4] [--controls 2] [--stock live|mock] [--skip-quality]
+  sfx:build [--provider synth|elevenlabs]   create the comedic sound-effects library in assets/sfx
 
 Daily / weekly automation
   run-daily [--stock 10]    discover -> score -> keep >= N finished productions in stock -> fill open slots -> report
@@ -81,6 +87,14 @@ async function main() {
     }
     case 'smoke': { const r = await runSmoke(cfg, store); console.log(r.markdown); writeSummary(r.markdown); if (!r.ok) process.exitCode = 1; return; }
     case 'pilot': { const r = await runPilot(cfg, store, { drafts: !!flags.drafts, count: Number(flags.count ?? 3) }); console.log(r.markdown); writeSummary(r.markdown); if (!r.ok) process.exitCode = 1; return; }
+    case 'dog-pilot': {
+      const provider = (['gemini', 'runway', 'mock'].includes(String(flags.provider)) ? String(flags.provider) : 'mock') as 'gemini' | 'runway' | 'mock';
+      const r = await runDogPilot(cfg, store, { provider, model: flags.model ? String(flags.model) : undefined, ai: Number(flags.ai ?? 4), rankings: Number(flags.rankings ?? 4), controls: Number(flags.controls ?? 2), stock: flags.stock === 'mock' ? 'mock' : 'live', skipQuality: !!flags['skip-quality'] });
+      console.log(r.markdown); writeSummary(r.markdown);
+      if (!r.ok) process.exitCode = 1;
+      return;
+    }
+    case 'sfx:build': { const r = await ensureSfxLibrary(cfg, flags.provider === 'elevenlabs' ? 'elevenlabs' : 'synth'); log.info(`sfx library: ${r.present} effects (${r.created} created)`); return; }
     case 'score': { if (flags.rescore) await rescoreUnscored(store); await scoreAll(cfg, store, Number(flags.limit ?? 200)); return; }
     case 'fetch': { const r = await fetchProbe(cfg, store, Number(flags.limit ?? 30)); log.info(`fetch probe: tried ${r.tried}, ok ${r.ok}, failed/rejected ${r.failed}`); return; }
     case 'funnel': {

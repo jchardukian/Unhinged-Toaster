@@ -70,11 +70,11 @@ interface PixabayHit {
   videos: Record<'large' | 'medium' | 'small' | 'tiny', { url: string; width: number; height: number; size: number }>;
 }
 
-export async function discoverPixabay(cfg: Config, limit: number): Promise<Candidate[]> {
+export async function discoverPixabay(cfg: Config, limit: number, queries: { q: string; category: ContentCategory }[] = CATEGORY_QUERIES): Promise<Candidate[]> {
   if (!cfg.pixabayKey) throw new Error('PIXABAY_API_KEY not set');
   const now = new Date().toISOString();
   const out: Candidate[] = [];
-  for (const { q, category } of CATEGORY_QUERIES) {
+  for (const { q, category } of queries) {
     const sp = new URLSearchParams({ key: cfg.pixabayKey, q, video_type: 'film', order: 'popular', safesearch: 'true', per_page: String(Math.min(200, Math.max(3, limit))) });
     const res = await withRetry(`pixabay ${q}`, () => fetch(`https://pixabay.com/api/videos/?${sp}`), { attempts: 3 });
     if (!res.ok) { log.warn(`pixabay ${q} -> ${res.status}`); continue; }
@@ -97,12 +97,12 @@ export async function discoverPixabay(cfg: Config, limit: number): Promise<Candi
 }
 
 // ---------------------------------------------------------------- Pexels (Pexels License: commercial OK)
-export async function discoverPexels(cfg: Config, limit: number): Promise<Candidate[]> {
+export async function discoverPexels(cfg: Config, limit: number, queries: { q: string; category: ContentCategory }[] = CATEGORY_QUERIES): Promise<Candidate[]> {
   if (!cfg.pexelsKey) throw new Error('PEXELS_API_KEY not set');
   const now = new Date().toISOString();
   const out: Candidate[] = [];
-  for (const { q, category } of CATEGORY_QUERIES) {
-    const res = await withRetry(`pexels ${q}`, () => fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(q)}&per_page=${Math.min(80, limit)}`, { headers: { authorization: cfg.pexelsKey! } }), { attempts: 3 });
+  for (const { q, category } of queries) {
+    const res = await withRetry(`pexels ${q}`, () => fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(q)}&per_page=${Math.min(80, limit)}&orientation=portrait`, { headers: { authorization: cfg.pexelsKey! } }), { attempts: 3 });
     if (!res.ok) { log.warn(`pexels ${q} -> ${res.status}`); continue; }
     const j = (await res.json()) as { videos: { id: number; url: string; duration: number; width: number; height: number; user: { name: string; url: string }; video_files: { link: string; width: number; height: number; quality: string }[] }[] };
     for (const v of j.videos) {
@@ -718,3 +718,11 @@ function dedupeById(cs: Candidate[]): Candidate[] {
   const seen = new Set<string>();
   return cs.filter((c) => { const k = `${c.source_platform}:${c.source_id}`; if (seen.has(k)) return false; seen.add(k); return true; });
 }
+
+/** Licensed stock queries for real-dog rankings (Pexels / Pixabay only: commercial reuse + modification allowed). */
+export const DOG_STOCK_QUERIES: { q: string; category: ContentCategory }[] = [
+  { q: 'funny dog', category: 'funny_animals' }, { q: 'dog fail', category: 'funny_animals' }, { q: 'dog zoomies', category: 'funny_animals' },
+  { q: 'dog slips', category: 'funny_animals' }, { q: 'puppy playing', category: 'funny_animals' }, { q: 'dog jumping', category: 'funny_animals' },
+  { q: 'dog running into', category: 'funny_animals' }, { q: 'dog confused', category: 'funny_animals' }, { q: 'dog costume', category: 'funny_animals' },
+  { q: 'dog steals food', category: 'funny_animals' }, { q: 'dog bath', category: 'funny_animals' }, { q: 'dog snow', category: 'funny_animals' },
+];
