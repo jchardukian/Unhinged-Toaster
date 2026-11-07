@@ -257,6 +257,7 @@ export async function discoverRedditRss(cfg: Config, limit: number, windows: ('d
       const entries = parseRedditAtom(xml);
       entries.forEach((e, rank) => {
         if (!e.mediaId) return;
+        if (latinRatio(e.title) < 0.6) return; // English-language channel: titles in other scripts are skipped (same rule as YouTube)
         out.push({
           ...base('reddit', now),
           source_id: e.postId, source_url: e.link, media_url: `https://v.redd.it/${e.mediaId}/DASH_1080.mp4`,

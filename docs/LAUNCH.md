@@ -38,3 +38,14 @@ fair-use assessment → Buffer post → monitor. Nothing is manual after the one
 - Reading platform e-mails (copyright claims, strikes). Record them with `toaster incident "<text>"` or set
   `EMERGENCY_STOP=true`; the monitor pauses on its own only for failures it can see (Buffer errors, QC collapse, budget).
 - Nothing else.
+
+## Audience (owner decision 2026-11-07, permanent)
+English-language channel for viewers in the United States.
+- Copy: the copywriter writes natural American English; British spellings are repaired automatically, British slang is
+  rejected and rewritten, hashtags are ASCII English (`shared/language.ts`).
+- Source language: Whisper's detected language is kept even for non-English speech (it used to be discarded as a
+  "hallucination", which made foreign dialogue look like silence). The vision scorer reports whether the joke depends on
+  dialogue, whether non-English on-screen text carries it, whether cultural context is needed, and how well it works
+  muted. `languageGate` rejects before rendering (`rejected_language`, reason recorded) and again in QC on the finished
+  file. Footage filmed abroad passes when the gag is universal; nothing is inferred from appearance, ethnicity or accent.
+- QC editorial adds `us_fit` (≥ 6) and natural-American-English checks; failures are never scheduled.

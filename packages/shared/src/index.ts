@@ -16,3 +16,4 @@ export * from './quality.js';
 export * from './formats.js';
 export * from './autopilot.js';
 export * from './fairuse.js';
+export * from './language.js';

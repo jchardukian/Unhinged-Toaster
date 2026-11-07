@@ -5,7 +5,7 @@ import { analyzeClip } from './analyze.js';
 import { contactSheet, readWatermark, sheetBase64, sheetPathFor } from './frames.js';
 import { log, type Config } from '../config.js';
 import type { Store } from '../store.js';
-import { transcribe } from './captions.js';
+import { transcribe, transcribeDetailed } from './captions.js';
 import { writeCopy } from './copy.js';
 import { downloadMedia, extractAudio, ffprobe, mediaDuration, videoPhash } from './media.js';
 import { loadTemplate, pickMusic, renderShort } from './render.js';
@@ -91,20 +91,22 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
 
     // transcript (for captions + better copy); fine if absent
     const audio = await extractAudio(src, path.join(dir, 'audio.mp3'));
-    const transcript = audio ? await transcribe(cfg, audio) : null;
+    const speech = audio ? await transcribeDetailed(cfg, audio) : null;
+    const transcript = speech?.transcript ?? null;
+    const speechInfo = speech && speech.wordCount > 0 ? { language: speech.language, words: speech.wordCount, excerpt: speech.text.slice(0, 300) } : null;
 
     // vision pass: contact sheet -> re-score with frames (detects watermarks / real creator, grounds the copy in what happens)
     const sheet = await contactSheet(src, sheetPathFor(dir)).catch(() => null);
     const frames = sheet ? sheetBase64(sheet) : undefined;
     if (frames) {
-      const rescored = await scoreCandidate(cfg, { ...c, status: 'discovered' }, await store.weights(), transcript?.text, frames);
-      if (rescored.status === 'rejected_safety' || rescored.status === 'blocked_rights' || rescored.status === 'rejected_score') {
-        await store.patchCandidate(c.id, { status: rescored.status, status_reason: `vision pass: ${rescored.status_reason}`, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null });
+      const rescored = await scoreCandidate(cfg, { ...c, status: 'discovered' }, await store.weights(), transcript?.text, frames, speechInfo);
+      if (rescored.status === 'rejected_safety' || rescored.status === 'blocked_rights' || rescored.status === 'rejected_score' || rescored.status === 'rejected_language') {
+        await store.patchCandidate(c.id, { meta_json: rescored.meta_json ?? null, status: rescored.status, status_reason: `vision pass: ${rescored.status_reason}`, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null });
         log.info(`vision pass stopped ${c.id}: ${rescored.status} (${rescored.status_reason})`);
         return null;
       }
-      c = { ...c, llm_score: rescored.llm_score, final_score: rescored.final_score, llm_rationale: rescored.llm_rationale, safety_flags: rescored.safety_flags, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null };
-      await store.patchCandidate(c.id, { llm_score: c.llm_score, final_score: c.final_score, llm_rationale: c.llm_rationale, safety_flags: c.safety_flags, copyright_risk: c.copyright_risk, copyright_risk_reasons: c.copyright_risk_reasons, detected_handle: c.detected_handle, detected_platform: c.detected_platform, visual_summary: c.visual_summary });
+      c = { ...c, meta_json: rescored.meta_json ?? c.meta_json ?? null, llm_score: rescored.llm_score, final_score: rescored.final_score, llm_rationale: rescored.llm_rationale, safety_flags: rescored.safety_flags, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null };
+      await store.patchCandidate(c.id, { meta_json: c.meta_json ?? null, llm_score: c.llm_score, final_score: c.final_score, llm_rationale: c.llm_rationale, safety_flags: c.safety_flags, copyright_risk: c.copyright_risk, copyright_risk_reasons: c.copyright_risk_reasons, detected_handle: c.detected_handle, detected_platform: c.detected_platform, visual_summary: c.visual_summary });
       // hard backstop: broadcast / pro-sports / TV footage seen by the vision pass or heard in the transcript is never produced
       const b = broadcastRisk(`${c.title}\n${c.description ?? ''}\n${c.visual_summary ?? ''}\n${transcript?.text.slice(0, 400) ?? ''}`);
       if (b.high && c.rights_status !== 'cleared') {
@@ -166,7 +168,8 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
       file: outPath, candidate: c, headline: copy.headline, caption: copy.caption, hashtags: copy.hashtags, commentaryMode, commentary: copy.commentary,
       edits: { freeze: !!timeline.beats.freeze, punchIn: !!timeline.beats.punchIn, replay: !!timeline.beats.replay, captions: (transcript?.words.length ?? 0) >= 6 },
       publicText: [copy.caption, attribution, copy.hashtags.map((t) => `#${t}`).join(' ')].join('\n\n'), words: captionWords, siblingProductions: siblings,
-      transcribe: process.env.QC_RETRANSCRIBE === 'false' ? undefined : async (file) => { const a = await extractAudio(file, path.join(dir, 'qc_audio.mp3')); return a ? transcribe(cfg, a) : null; },
+      transcribe: process.env.QC_RETRANSCRIBE === 'false' ? undefined : async (file) => { const a = await extractAudio(file, path.join(dir, 'qc_audio.mp3')); return a ? transcribeDetailed(cfg, a) : null; },
+      sourceSpeech: speechInfo,
     });
     if (!qc.ok && process.env.QC_ENFORCE !== 'false') {
       const why = qc.checks.filter((x) => !x.ok && x.severity === 'block').map((x) => `${x.name}: ${x.detail}`).join('; ').slice(0, 280);

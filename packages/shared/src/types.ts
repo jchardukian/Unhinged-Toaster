@@ -66,6 +66,7 @@ export type CandidateStatus =
   | 'rejected_safety'
   | 'rejected_quality'  // source below 720p-class
   | 'rejected_qc'       // rendered video failed the automated quality-control gate
+  | 'rejected_language' // joke needs non-English dialogue/text or cultural context (English-language U.S. channel)
   | 'blocked_rights'
   | 'ready'          // cleared + scored, waiting to be produced
   | 'producing'

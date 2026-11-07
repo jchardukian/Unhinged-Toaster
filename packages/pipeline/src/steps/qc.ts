@@ -2,11 +2,11 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { HARD_BLOCK_FLAGS, type Candidate } from '@toaster/shared';
+import { HARD_BLOCK_FLAGS, languageGate, UK_SLANG, type Candidate } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { isFatal } from '../guard.js';
 import { chatJson } from '../llm.js';
-import { isProfane, type Transcript, type Word } from './captions.js';
+import { isProfane, type SpeechInfo, type Word } from './captions.js';
 import { contactSheet, sheetBase64 } from './frames.js';
 import { ffprobe } from './media.js';
 
@@ -20,11 +20,11 @@ const execFileP = promisify(execFile);
  */
 export interface QcCheck { name: string; ok: boolean; severity: 'block' | 'warn'; detail: string }
 export interface QcResult { ok: boolean; score: number | null; checks: QcCheck[]; editorial: EditorialVerdict | null; cost_note: string }
-export interface EditorialVerdict { hook: number; payoff: number; entertainment: number; commentary: number; storytelling: number; editing: number; defects: string[]; brand_visible: boolean; captions_readable: boolean; rationale: string }
+export interface EditorialVerdict { hook: number; payoff: number; entertainment: number; commentary: number; storytelling: number; editing: number; us_fit: number; works_muted: number; natural_american_english: boolean; dialogue_dependent: boolean; onscreen_text_language: string; onscreen_text_essential: boolean; cultural_context_needed: boolean; defects: string[]; brand_visible: boolean; captions_readable: boolean; rationale: string }
 
 export const QC_LIMITS = {
   width: 1080, height: 1920, minSec: 5, maxSec: 60, maxBlackSec: 0.4, maxFreezeSec: 2.6, avDriftSec: 0.5, minLufs: -22, maxLufs: -8,
-  minHook: 6, minPayoff: 6, minEntertainment: 6, minCommentary: 6, minStorytelling: 6, minEditing: 5, captionOverlap: 0.6,
+  minHook: 6, minPayoff: 6, minEntertainment: 6, minCommentary: 6, minStorytelling: 6, minEditing: 5, minUsFit: 6, captionOverlap: 0.6,
 } as const;
 
 export interface QcInput {
@@ -37,8 +37,10 @@ export interface QcInput {
   edits?: { freeze: boolean; punchIn: boolean; replay: boolean; captions: boolean };
   /** productions for the same candidate already in the store (double production = duplicate) */
   siblingProductions: number;
-  /** optional: re-transcribe the final render to verify caption accuracy (Whisper, ~$0.006) */
-  transcribe?: (file: string) => Promise<Transcript | null>;
+  /** optional: re-transcribe the final render (caption accuracy + spoken language; Whisper, ~$0.006) */
+  transcribe?: (file: string) => Promise<SpeechInfo | null>;
+  /** what Whisper heard in the SOURCE before editing (preferred over the final mix, which also carries music/VO) */
+  sourceSpeech?: { language: string | null; words: number; excerpt: string } | null;
   /** optional: skip the vision model (tests) */
   editorial?: boolean;
 }
@@ -86,6 +88,12 @@ export function captionTimingIssues(words: Word[], durationSec: number): string[
 }
 
 /** Pure: the editorial gate. */
+/** Pure: a 0-10 score; a boolean answer (the model sometimes returns true/false for a score) counts as "not scored" (-1). */
+export function score10(v: unknown): number {
+  if (typeof v === 'boolean' || v == null || v === '') return -1;
+  const x = Number(v); return Number.isFinite(x) ? Math.max(0, Math.min(10, Math.round(x))) : -1;
+}
+
 export function editorialGate(e: EditorialVerdict, commentaryMode: 'outro_voice' | 'text_only' | 'none' = 'outro_voice'): string[] {
   const r: string[] = [];
   if (e.hook < QC_LIMITS.minHook) r.push(`weak opening hook (${e.hook}/10)`);
@@ -94,6 +102,9 @@ export function editorialGate(e: EditorialVerdict, commentaryMode: 'outro_voice'
   if (commentaryMode !== 'none' && e.commentary < QC_LIMITS.minCommentary) r.push(`commentary adds little (${e.commentary}/10)`);
   if (e.storytelling < QC_LIMITS.minStorytelling) r.push(`weak setup-to-payoff storytelling (${e.storytelling}/10)`);
   if (e.editing < QC_LIMITS.minEditing) r.push(`editing not purposeful (${e.editing}/10)`);
+  if (e.us_fit === -1) r.push('U.S.-audience fit not scored');
+  else if (e.us_fit < QC_LIMITS.minUsFit) r.push(`weak fit for an English-speaking U.S. audience (${e.us_fit}/10)`);
+  if (!e.natural_american_english) r.push('headline/commentary/caption not natural American English');
   if (e.defects.length) r.push(`visual defects: ${e.defects.join(', ')}`);
   if (!e.brand_visible) r.push('brand elements not visible');
   if (!e.captions_readable) r.push('captions / headline not readable');
@@ -110,7 +121,8 @@ export function qcScore(e: EditorialVerdict | null): number | null {
 const EDITORIAL_SYSTEM = `You are the independent quality reviewer for "The Unhinged Toaster", a comedy Shorts channel (angry toaster mascot,
 red/black/yellow comic-book branding, family-friendly). You receive six frames of a FINISHED vertical video in time order
 (left to right, top to bottom) plus its headline and caption. Judge the finished product, not the idea. Scale: zero is the
-worst you have seen, ten is the best; use the whole range and copy no number from this text.
+worst you have seen, ten is the best; use the whole range and copy no number from this text. Every score is an
+integer from zero to ten, never true or false.
 - hook: does the first moment make a scroller stop (clear subject, motion, readable headline)?
 - payoff: is there one clear comedic payoff visible in the later frames?
 - entertainment: would a general audience enjoy and share it?
@@ -119,11 +131,24 @@ worst you have seen, ten is the best; use the whole range and copy no number fro
 - storytelling: is there a setup that leads to the payoff (headline frames it, moment lands, ending is a button)?
 - editing: are the edits listed under "edits" purposeful for the joke (freeze before the payoff, punch-in on the
   moment, replay of the beat, captions that help), not decoration?
+The channel is English-language for viewers in the United States. Judge from observable signals only (speech heard,
+on-screen text, what happens), never from people's appearance, ethnicity or accent; footage filmed abroad is fine when
+the gag is universal.
+- us_fit: would an English-speaking American viewer get the joke instantly, with no translation or cultural explanation?
+- works_muted: how well it lands with the original audio muted (headline, commentary and visuals only)
+- natural_american_english (bool): headline, commentary and caption read like natural, casual American English (American
+  spelling, no British slang, no stiff or translated-sounding phrasing)
+- dialogue_dependent (bool): the joke needs the spoken words understood ("speech_heard" tells you the language Whisper
+  detected); false for screams, laughter, animal sounds, physical comedy or background talk
+- onscreen_text_language: "none" | "english" | "other" for source text that matters (captions, signs, meme text; ignore
+  our own yellow/red channel graphics and the Instagram/TikTok handle watermark)
+- onscreen_text_essential (bool): the joke needs that text read
+- cultural_context_needed (bool): the payoff needs a regional reference, local celebrity, custom or wordplay
 - defects (array, possibly empty) from: black_bars, letterboxing, cut_off_text, overlapping_overlays, unreadable_caption,
   blurry, stretched, watermark_covering_action, mascot_missing, black_frame, frozen_frame, wrong_aspect
 - brand_visible: the toaster mascot or wordmark appears
 - captions_readable: any on-screen text is legible and inside the frame
-- rationale: one sentence. Respond with a single JSON object: {"hook":n,"payoff":n,"entertainment":n,"commentary":n,"storytelling":n,"editing":n,"defects":[],"brand_visible":true,"captions_readable":true,"rationale":""}`;
+- rationale: one sentence. Respond with a single JSON object: {"hook":n,"payoff":n,"entertainment":n,"commentary":n,"storytelling":n,"editing":n,"us_fit":n,"works_muted":n,"natural_american_english":true,"dialogue_dependent":false,"onscreen_text_language":"none","onscreen_text_essential":false,"cultural_context_needed":false,"defects":[],"brand_visible":true,"captions_readable":true,"rationale":""}`;
 
 export async function qualityControl(cfg: Config, i: QcInput): Promise<QcResult> {
   const checks: QcCheck[] = [];
@@ -165,17 +190,19 @@ export async function qualityControl(cfg: Config, i: QcInput): Promise<QcResult>
   add('source_credits', creditsOk, 'block', creditsOk ? 'credit block present (source, creator, contact)' : 'credit block incomplete');
   add('no_internal_text', !/REVIEW BEFORE APPROVING|transformation review|copyright risk/i.test(i.publicText), 'block', 'public text clean');
   add('hashtags', i.hashtags.length >= 3 && i.hashtags.length <= 10, 'warn', `${i.hashtags.length} tags`);
+  let heard: SpeechInfo | null = null;
+  if (i.transcribe) { try { heard = await i.transcribe(i.file); } catch (e) { if (isFatal(e)) throw e; } }
   if (i.words && i.words.length) {
     const timing = captionTimingIssues(i.words, probe.duration);
     add('caption_timing', timing.length === 0, 'block', timing.join('; ') || `${i.words.length} caption words inside the timeline`);
     if (i.transcribe) {
-      try {
-        const t = await i.transcribe(i.file);
-        const overlap = t ? captionOverlap(i.words.map((w) => w.word), t.words.map((w) => w.word)) : null;
-        add('caption_accuracy', overlap == null || overlap >= QC_LIMITS.captionOverlap, 'block', overlap == null ? 'final render not transcribable' : `${(overlap * 100).toFixed(0)} % of caption words heard in the final mix`);
-      } catch (e) { if (isFatal(e)) throw e; add('caption_accuracy', true, 'warn', `not verified: ${(e as Error).message.slice(0, 120)}`); }
+      const t = heard?.transcript ?? null;
+      const overlap = t ? captionOverlap(i.words.map((w) => w.word), t.words.map((w) => w.word)) : null;
+      add('caption_accuracy', overlap == null || overlap >= QC_LIMITS.captionOverlap, 'block', overlap == null ? 'final render not transcribable' : `${(overlap * 100).toFixed(0)} % of caption words heard in the final mix`);
     }
   }
+  const speech = i.sourceSpeech ?? (heard && heard.wordCount > 0 ? { language: heard.language, words: heard.wordCount, excerpt: heard.text.slice(0, 300) } : null);
+  add('american_english_copy', !UK_SLANG.test(`${i.headline} ${i.caption} ${i.commentary ?? ''}`), 'block', 'no British slang in headline/caption/commentary');
 
   // ---- editorial (vision model on the finished file)
   let editorial: EditorialVerdict | null = null;
@@ -183,11 +210,17 @@ export async function qualityControl(cfg: Config, i: QcInput): Promise<QcResult>
     try {
       const sheet = await contactSheet(i.file, path.join(dir, 'qc_frames.jpg'));
       const b64 = sheetBase64(sheet);
-      const r = await chatJson<Partial<EditorialVerdict>>(cfg, EDITORIAL_SYSTEM, JSON.stringify({ headline: i.headline, caption: i.caption, commentary: i.commentaryMode === 'none' ? '(none: the clip\'s own sound carries the ending)' : i.commentary ?? '', commentary_mode: i.commentaryMode, edits: i.edits ?? 'unknown', duration_sec: Number(probe.duration.toFixed(1)), frames: 'attached: six frames, time order' }), { temperature: 0.1, maxTokens: 350, imageJpegBase64: b64 });
+      const r = await chatJson<Partial<EditorialVerdict>>(cfg, EDITORIAL_SYSTEM, JSON.stringify({ headline: i.headline, caption: i.caption, commentary: i.commentaryMode === 'none' ? '(none: the clip\'s own sound carries the ending)' : i.commentary ?? '', commentary_mode: i.commentaryMode, edits: i.edits ?? 'unknown', speech_heard: speech ?? 'no speech detected', duration_sec: Number(probe.duration.toFixed(1)), frames: 'attached: six frames, time order' }), { temperature: 0.1, maxTokens: 450, imageJpegBase64: b64 });
       const n = (v: unknown) => Math.max(0, Math.min(10, Math.round(Number(v) || 0)));
-      editorial = { hook: n(r.hook), payoff: n(r.payoff), entertainment: n(r.entertainment), commentary: i.commentaryMode === 'none' ? n(r.entertainment) : n(r.commentary), storytelling: n(r.storytelling), editing: n(r.editing), defects: Array.isArray(r.defects) ? r.defects.map(String).slice(0, 8) : [], brand_visible: r.brand_visible !== false, captions_readable: r.captions_readable !== false, rationale: String(r.rationale ?? '').slice(0, 300) };
+      if (score10((r as Record<string, unknown>).us_fit) < 0 || score10((r as Record<string, unknown>).works_muted) < 0) {
+        const again = await chatJson<Partial<EditorialVerdict>>(cfg, EDITORIAL_SYSTEM, JSON.stringify({ headline: i.headline, caption: i.caption, commentary: i.commentary ?? '', speech_heard: speech ?? 'no speech detected', note: 'us_fit and works_muted must be integers from 0 to 10', frames: 'attached' }), { temperature: 0.1, maxTokens: 450, imageJpegBase64: b64 });
+        (r as Record<string, unknown>).us_fit = (again as Record<string, unknown>).us_fit; (r as Record<string, unknown>).works_muted = (again as Record<string, unknown>).works_muted;
+      }
+      editorial = { hook: n(r.hook), payoff: n(r.payoff), entertainment: n(r.entertainment), commentary: i.commentaryMode === 'none' ? n(r.entertainment) : n(r.commentary), storytelling: n(r.storytelling), editing: n(r.editing), us_fit: score10(r.us_fit), works_muted: score10(r.works_muted), natural_american_english: r.natural_american_english !== false, dialogue_dependent: r.dialogue_dependent === true, onscreen_text_language: typeof r.onscreen_text_language === 'string' ? r.onscreen_text_language.toLowerCase() : 'none', onscreen_text_essential: r.onscreen_text_essential === true, cultural_context_needed: r.cultural_context_needed === true, defects: Array.isArray(r.defects) ? r.defects.map(String).slice(0, 8) : [], brand_visible: r.brand_visible !== false, captions_readable: r.captions_readable !== false, rationale: String(r.rationale ?? '').slice(0, 300) };
       const gate = editorialGate(editorial, i.commentaryMode);
-      add('editorial', gate.length === 0, 'block', gate.join('; ') || `hook ${editorial.hook}, payoff ${editorial.payoff}, entertainment ${editorial.entertainment}, commentary ${editorial.commentary}, story ${editorial.storytelling}, editing ${editorial.editing}`);
+      const lang = languageGate({ speechLanguage: speech?.language ?? null, speechWords: speech?.words ?? 0, dialogueDependent: editorial.dialogue_dependent, onscreenTextLanguage: editorial.onscreen_text_language, onscreenTextEssential: editorial.onscreen_text_essential, culturalContextNeeded: editorial.cultural_context_needed, worksMuted: editorial.works_muted < 0 ? null : editorial.works_muted });
+      add('language_audience', lang.length === 0, 'block', lang.join('; ') || `speech ${speech ? `${speech.language} (${speech.words} words)` : 'none'}; on-screen text ${editorial.onscreen_text_language}; us_fit ${editorial.us_fit}, works muted ${editorial.works_muted}`);
+      add('editorial', gate.length === 0, 'block', gate.join('; ') || `hook ${editorial.hook}, payoff ${editorial.payoff}, entertainment ${editorial.entertainment}, commentary ${editorial.commentary}, story ${editorial.storytelling}, editing ${editorial.editing}, us_fit ${editorial.us_fit}`);
     } catch (e) {
       if (isFatal(e)) throw e;
       add('editorial', false, 'block', `vision check failed: ${(e as Error).message.slice(0, 160)}`);

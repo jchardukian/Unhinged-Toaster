@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AUTOPILOT_AUTHORIZATION_PHRASE, BufferClient, type Candidate, type Decision, type Production } from '@toaster/shared';
-import { captionOverlap, captionTimingIssues, editorialGate, parseIntervals, parseLufs, qcScore } from '../src/steps/qc.js';
+import { captionOverlap, captionTimingIssues, editorialGate, parseIntervals, parseLufs, qcScore, score10 } from '../src/steps/qc.js';
 import { calibrationReport, ownerVerdicts } from '../src/steps/calibration.js';
 import { publishWeek } from '../src/steps/publish.js';
 import { JsonStore } from '../src/store.js';
@@ -25,7 +25,7 @@ test('qc pure rules: caption overlap, caption timing, editorial gate, score', ()
   assert.match(captionTimingIssues([{ word: 'late', start: 9, end: 11 }], 10)[0], /past the end/);
   assert.match(captionTimingIssues([{ word: 'fuck', start: 0, end: 0.2 }], 10)[0], /profanity/);
   assert.match(captionTimingIssues([{ word: 'b', start: 2, end: 2.2 }, { word: 'a', start: 1, end: 1.2 }], 10)[0], /out of order/);
-  const good = { hook: 8, payoff: 8, entertainment: 7, commentary: 7, storytelling: 8, editing: 6, defects: [], brand_visible: true, captions_readable: true, rationale: '' };
+  const good = { hook: 8, payoff: 8, entertainment: 7, commentary: 7, storytelling: 8, editing: 6, us_fit: 8, works_muted: 7, natural_american_english: true, dialogue_dependent: false, onscreen_text_language: 'none', onscreen_text_essential: false, cultural_context_needed: false, defects: [], brand_visible: true, captions_readable: true, rationale: '' };
   assert.deepEqual(editorialGate(good), []);
   assert.equal(qcScore(good), 7.6);
   assert.equal(qcScore({ ...good, defects: ['cut_off_text'] }), 6.6);
@@ -33,6 +33,10 @@ test('qc pure rules: caption overlap, caption timing, editorial gate, score', ()
   assert.deepEqual(editorialGate({ ...good, commentary: 3 }, 'none'), [], 'no commentary line to judge when the clip\'s own sound carries the ending');
   assert.match(editorialGate({ ...good, storytelling: 4 })[0], /storytelling/);
   assert.match(editorialGate({ ...good, editing: 2 })[0], /editing/);
+  assert.match(editorialGate({ ...good, us_fit: 4 })[0], /U\.S\. audience/);
+  assert.match(editorialGate({ ...good, natural_american_english: false })[0], /American English/);
+  assert.equal(score10(true), -1, 'a boolean is not a score (it used to become 1)'); assert.equal(score10('8'), 8); assert.equal(score10(12), 10);
+  assert.match(editorialGate({ ...good, us_fit: -1 })[0], /not scored/);
   assert.equal(editorialGate({ ...good, hook: 4 }).length, 1);
   assert.equal(editorialGate({ ...good, brand_visible: false, captions_readable: false, defects: ['black_frame'] }).length, 3);
   assert.equal(qcScore(null), null);

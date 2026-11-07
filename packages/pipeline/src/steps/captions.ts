@@ -7,8 +7,22 @@ import { mediaDuration } from './media.js';
 export interface Word { word: string; start: number; end: number }
 export interface Transcript { text: string; words: Word[] }
 
+/**
+ * What was heard in the audio, kept even when the words are not usable as captions: Whisper's detected language and the
+ * raw text. A non-English transcript used to be dropped as a "hallucination", which made foreign-language dialogue look
+ * like silence to the language gate.
+ */
+export interface SpeechInfo { transcript: Transcript | null; language: string | null; text: string; wordCount: number; discarded: string | null }
+
+/** Pure: is this detected speech English? Unknown / empty counts as no speech. */
+export function isEnglishSpeech(s: Pick<SpeechInfo, 'language'> | null): boolean { return !s?.language || /^(en|english)$/i.test(s.language); }
+
 /** Whisper (OpenAI) word-level transcription. Returns null when there is no usable speech. */
 export async function transcribe(cfg: Config, audioFile: string): Promise<Transcript | null> {
+  return (await transcribeDetailed(cfg, audioFile))?.transcript ?? null;
+}
+
+export async function transcribeDetailed(cfg: Config, audioFile: string): Promise<SpeechInfo | null> {
   const form = new FormData();
   form.append('file', new Blob([fs.readFileSync(audioFile)]), 'audio.mp3');
   form.append('model', cfg.transcribeModel);
@@ -29,12 +43,15 @@ export async function transcribe(cfg: Config, audioFile: string): Promise<Transc
   }
   recordSuccess('openai');
   recordWhisper((await mediaDuration(audioFile)) ?? 0);
-  const j = (await res.json()) as { text: string; words?: Word[] };
+  const j = (await res.json()) as { text: string; words?: Word[]; language?: string };
   const words = (j.words ?? []).filter((w) => w.word.trim());
-  if (words.length === 0 || j.text.trim().length < 2) return null;
+  const base = { language: j.language ?? null, text: (j.text ?? '').trim(), wordCount: words.length };
+  if (words.length === 0 || base.text.length < 2) return { ...base, transcript: null, discarded: 'no_speech' };
+  // captions are English-only: any non-English speech is reported to the language gate, never captioned
+  if (!isEnglishSpeech(base)) { log.info(`speech in ${base.language}: "${base.text.slice(0, 60)}" (not captioned; language gate decides)`); return { ...base, transcript: null, discarded: 'non_english' }; }
   const h = isHallucination(j.text, words);
-  if (h) { log.info(`transcript discarded as Whisper hallucination (${h}): "${j.text.trim().slice(0, 60)}"`); return null; }
-  return { text: j.text.trim(), words };
+  if (h) { log.info(`transcript discarded as Whisper hallucination (${h}): "${base.text.slice(0, 60)}"`); return { ...base, transcript: null, discarded: h }; }
+  return { ...base, transcript: { text: base.text, words }, discarded: null };
 }
 
 /** PG channel: swear words are masked in captions (f**k) and muted in the source audio for the word's duration. */
