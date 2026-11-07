@@ -110,6 +110,19 @@ shortlist (title, platform, verified views, URL, comedy score, duration, rights 
 Buffer posts and does not touch the daily/weekly schedules; rights stay exactly as the general policy says (standard
 licence = transformation review, owner decides per draft).
 
+## Approval gate (what Buffer actually enforces)
+
+Every post is created with `saveToDraft: true` and its intended `dueAt` (the planned slot). A Buffer **draft** is not
+in the publishing queue: when its scheduled time arrives nothing happens. It publishes only after a person opens it in
+Buffer and chooses "Add to queue" / "Schedule" (allowed actions on a draft: addPostToQueue, publishPostNow,
+updatePostSchedule, deletePost, ...). The client refuses any create that is neither a draft nor `needsApproval`
+(`publish guard`). `BUFFER_APPROVAL_MODE=needs_approval` would use Buffer's approval queue instead, but that feature
+needs a Team plan with members; this organisation has 0 members, so drafts are the gate. There is no separate
+"permission pending" queue: a transformation-review video is drafted like any other, with the internal review note
+(source, creator, URL, copyright-risk) that the owner reads before approving and that is stripped from the public
+caption on approval. Creator permissions are the owner's decision at that moment; nothing in the automation sends
+outreach (`rights:outreach` is a manual CLI command only).
+
 ## Weekly operation
 - Sunday morning: read the readiness report (weekly run summary or `GET <worker>/weeks/next/report?format=md`): it lists which drafts are transformation-review (source, creator, copyright risk) and which have an explicit basis. Then open Buffer → Drafts (review drafts carry the REVIEW tag when configured). Approve ("Add to queue" or "Schedule") or delete. Captions are already public-ready: creator credit, source link, edit summary, contact e-mail.
 - Nothing else. A deletion is confirmed after two polls ≥ 10 min apart, then a replacement is rendered and drafted into the same slot (Worker: ~30–60 min; Actions fallback: ~2–4 h). Replacements are new drafts, so they appear in the Drafts tab for your next look.
