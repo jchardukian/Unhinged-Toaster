@@ -13,3 +13,7 @@ export * from './report.js';
 export * from './provenance.js';
 export * from './editplan.js';
 export * from './quality.js';
+export * from './formats.js';
+export * from './autopilot.js';
+export * from './fairuse.js';
+export * from './language.js';

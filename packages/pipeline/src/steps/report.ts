@@ -9,6 +9,7 @@ export async function readinessReport(cfg: Config, store: Store, which: 'current
     candidates: await store.listCandidates(),
     productions: await store.listProductions(),
     posts: await store.listPosts({ week: plan.week }),
+    allPosts: await store.listPosts(),
     now,
   });
   return { report, markdown: formatReadinessMarkdown(report) };

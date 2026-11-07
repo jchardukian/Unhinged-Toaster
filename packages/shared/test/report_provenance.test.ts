@@ -1,3 +1,5 @@
+import { formatPerformance, formatPerformanceMarkdown } from '../src/formats.js';
+import type { Production, ScheduledPost } from '../src/types.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildReadinessReport, formatReadinessMarkdown } from '../src/report.js';
@@ -68,4 +70,25 @@ test('broadcast / pro-sports / TV footage is flagged high risk by keyword backst
   assert.equal(broadcastRisk('Argentinian reporter pauses live broadcast to save a dog').high, true);
   assert.equal(broadcastRisk('Tiny kitten decided this giant leaf was the ultimate hiding spot').high, false);
   assert.equal(broadcastRisk('Down 30-25 with 3.8 seconds to go. Whitesboro with the win').high, false); // fan-filmed high-school game stays eligible
+});
+
+test('per-format performance: views/hour mean and median, engagement per 1k views, cost per video; outliers do not move the median', () => {
+  const now = new Date('2026-11-10T00:00:00Z');
+  const prods = [
+    { id: 'p1', candidate_id: 'c1', content_format: 'ai_dog_comedy', production_cost_usd: 1.8 }, { id: 'p2', candidate_id: 'c2', content_format: 'ai_dog_comedy', production_cost_usd: 2.2 },
+    { id: 'p3', candidate_id: 'c3', content_format: 'general_viral', production_cost_usd: 0.04 },
+  ] as Production[];
+  const post = (id: string, production_id: string, slot: string, views: number, likes: number, content_format?: string) => ({ id, production_id, candidate_id: 'c', content_format, service: 'youtube', state: 'sent', slot_at: slot, views, likes, comments: 2, shares: 1 }) as unknown as ScheduledPost;
+  const posts = [
+    post('a', 'p1', '2026-11-08T00:00:00Z', 4800, 100),          // 48 h old: 100 views/h
+    post('b', 'p2', '2026-11-08T00:00:00Z', 480000, 1000),       // outlier: 10 000 views/h
+    post('c', 'p3', '2026-11-09T12:00:00Z', 600, 30, 'general_viral'), // 12 h old: too young to measure
+  ];
+  const s = formatPerformance(posts, prods, now);
+  const ai = s.find((x) => x.format === 'ai_dog_comedy')!;
+  assert.equal(ai.videos, 2); assert.equal(ai.posts_measured, 2); assert.equal(ai.median_views_per_hour, 100); assert.equal(ai.mean_views_per_hour, 5050);
+  assert.equal(ai.likes_per_1k, 2.3); assert.equal(ai.avg_cost_usd, 2);
+  const gv = s.find((x) => x.format === 'general_viral')!;
+  assert.equal(gv.posts_sent, 1); assert.equal(gv.posts_measured, 0); assert.equal(gv.mean_views_per_hour, null);
+  assert.match(formatPerformanceMarkdown(s).join('\n'), /\| ai_dog_comedy \| 2 \| 2 \| 2 \| 484800 \| 5050 \| 100 \| 2\.3 \|/);
 });

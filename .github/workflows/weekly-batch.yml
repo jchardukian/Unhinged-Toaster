@@ -84,9 +84,19 @@ jobs:
           BUFFER_TAG_REVIEW_ID: ${{ vars.BUFFER_TAG_REVIEW_ID }}
           BUFFER_TAG_CLEARED_ID: ${{ vars.BUFFER_TAG_CLEARED_ID }}
           CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
-          COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT }}
+          COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT || 'text_only' }}
           BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE || 'America/Chicago' }}
           PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS || '11:00,15:00,19:00' }}
+          # unattended publishing: OFF unless both variables are set (docs/AUTONOMY.md); EMERGENCY_STOP=true halts it
+          UNATTENDED_PUBLISHING: ${{ vars.UNATTENDED_PUBLISHING }}
+          UNATTENDED_AUTHORIZATION: ${{ vars.UNATTENDED_AUTHORIZATION }}
+          UNATTENDED_MIN_QC: ${{ vars.UNATTENDED_MIN_QC }}
+          UNATTENDED_REVIEW_DRAFTS: ${{ vars.UNATTENDED_REVIEW_DRAFTS }}
+          UNATTENDED_FAIR_USE: ${{ vars.UNATTENDED_FAIR_USE }}
+          UNATTENDED_FAIR_USE_MAX_RISK: ${{ vars.UNATTENDED_FAIR_USE_MAX_RISK }}
+          EMERGENCY_STOP: ${{ vars.EMERGENCY_STOP }}
+          QC_ENFORCE: ${{ vars.QC_ENFORCE }}
+          SFX_PROVIDER: ${{ vars.SFX_PROVIDER }}
         run: node packages/pipeline/dist/cli.js run-weekly ${{ inputs.dry_run && '--dry-run' || '' }}
       - name: Readiness report (always)
         if: always()
@@ -95,4 +105,14 @@ jobs:
           TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
           BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE || 'America/Chicago' }}
           PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS || '11:00,15:00,19:00' }}
+          # unattended publishing: OFF unless both variables are set (docs/AUTONOMY.md); EMERGENCY_STOP=true halts it
+          UNATTENDED_PUBLISHING: ${{ vars.UNATTENDED_PUBLISHING }}
+          UNATTENDED_AUTHORIZATION: ${{ vars.UNATTENDED_AUTHORIZATION }}
+          UNATTENDED_MIN_QC: ${{ vars.UNATTENDED_MIN_QC }}
+          UNATTENDED_REVIEW_DRAFTS: ${{ vars.UNATTENDED_REVIEW_DRAFTS }}
+          UNATTENDED_FAIR_USE: ${{ vars.UNATTENDED_FAIR_USE }}
+          UNATTENDED_FAIR_USE_MAX_RISK: ${{ vars.UNATTENDED_FAIR_USE_MAX_RISK }}
+          EMERGENCY_STOP: ${{ vars.EMERGENCY_STOP }}
+          QC_ENFORCE: ${{ vars.QC_ENFORCE }}
+          SFX_PROVIDER: ${{ vars.SFX_PROVIDER }}
         run: node packages/pipeline/dist/cli.js report

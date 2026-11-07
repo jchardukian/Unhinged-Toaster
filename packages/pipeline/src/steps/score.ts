@@ -1,4 +1,4 @@
-import { CONTENT_CATEGORIES, finalScore, heuristicScore, llmScore, MIN_FINAL_SCORE, type Candidate, type CategoryWeight, type LlmScoreResult } from '@toaster/shared';
+import { CONTENT_CATEGORIES, finalScore, heuristicScore, languageGate, llmScore, MIN_FINAL_SCORE, type Candidate, type CategoryWeight, type LanguageSignals, type LlmScoreResult } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { isFatal } from '../guard.js';
 import { chatJson } from '../llm.js';
@@ -26,14 +26,24 @@ Also assess copyright_risk for reusing this footage in a transformed commentary 
 - "high": professional/broadcast/TV/film/sports-league/news-agency footage, music videos, clips with a prominent commercial music track as the point, stock-agency watermarks, footage from another commentary/compilation channel, or any indication the poster is not the person who filmed it
 - "medium": ordinary user-filmed clip but the poster may not be the filmer, or there is background commercial music, or identifiable third parties are the joke
 - "low": clearly self-filmed amateur phone footage posted by the person who filmed it, no commercial music
-copyright_risk_reasons: array of short strings.`;
+copyright_risk_reasons: array of short strings.
+The channel is English-language for viewers in the United States. Judge from observable signals only (what is said, what
+text is on screen, what happens), never from people's appearance, ethnicity or accent; footage filmed abroad is fine when
+the gag is universal. Also return:
+- dialogue_dependent (bool): the joke requires understanding the spoken words (false for screams, laughter, animal sounds,
+  physical comedy, or speech that is just background)
+- onscreen_text_language: "none" | "english" | "other" (burned-in captions, signs or meme text that matter in the frames)
+- onscreen_text_essential (bool): the joke requires reading that text
+- cultural_context_needed (bool): the payoff depends on a regional reference, local celebrity, custom or wordplay an
+  American viewer would not get without explanation
+- works_muted: 0-10, how well the clip lands with the original audio muted`;
 
 /** True when the source gave real engagement numbers (views or comments or shares), not just a rank proxy. */
 export function statsKnown(c: Pick<Candidate, 'views' | 'comments' | 'shares'>): boolean {
   return c.views != null || c.comments != null || c.shares != null;
 }
 
-export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: CategoryWeight[], transcript?: string | null, framesJpegBase64?: string): Promise<Candidate> {
+export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: CategoryWeight[], transcript?: string | null, framesJpegBase64?: string, speech?: { language: string | null; words: number; excerpt: string } | null): Promise<Candidate> {
   let c = cIn;
   const h = heuristicScore(c);
   let llm: LlmScoreWithRisk | null = null;
@@ -47,9 +57,12 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
       stats: { views: c.views, likes: c.likes, comments: c.comments, shares: c.shares, published_at: c.published_at },
       duration_sec: c.duration_sec,
       transcript: transcript?.slice(0, 600) ?? null,
+      speech_heard: speech ?? null,
       frames: framesJpegBase64 ? 'attached: 6 frames, time order left-to-right, top-to-bottom' : 'not available',
-    }), { temperature: 0.2, maxTokens: 500, imageJpegBase64: framesJpegBase64 });
+    }), { temperature: 0.2, maxTokens: 600, imageJpegBase64: framesJpegBase64 });
+    const lang = languageSignalsOf(llm as unknown as Record<string, unknown>, speech ?? null);
     llm = sanitise(llm);
+    c = { ...c, meta_json: mergeMeta(c.meta_json, { language: lang }) };
     if (llm.visual_summary) c = { ...c, visual_summary: llm.visual_summary };
     if (llm.detected_handle) c = { ...c, detected_handle: llm.detected_handle, detected_platform: llm.detected_platform ?? null };
     const cr = llm.copyright_risk;
@@ -75,7 +88,9 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
   const f = statsKnown(c) ? finalScore(h, score, category, weights) : finalScore(score, score, category, weights);
   let status: Candidate['status'] = 'scored';
   let status_reason: string | null = null;
+  const langReasons = (() => { try { const m = JSON.parse(c.meta_json ?? '{}') as { language?: LanguageSignals }; return m.language ? languageGate(m.language) : []; } catch { return []; } })();
   if (blocked) { status = 'rejected_safety'; status_reason = reason ?? 'safety'; }
+  else if (langReasons.length) { status = 'rejected_language'; status_reason = `language: ${langReasons.join('; ')}`; }
   else if (f < MIN_FINAL_SCORE) { status = 'rejected_score'; status_reason = `final ${f} < ${MIN_FINAL_SCORE}`; }
   else if (c.rights_status === 'transformation_review' && c.copyright_risk === 'high') { status = 'blocked_rights'; status_reason = `copyright_risk high: ${(JSON.parse(c.copyright_risk_reasons ?? '[]') as string[]).slice(0, 3).join('; ')}`; }
   // provenance heuristics can mark risk high before the LLM runs (compilation / licensing accounts): never produce those
@@ -84,6 +99,24 @@ export async function scoreCandidate(cfg: Config, cIn: Candidate, weights: Categ
     ...c, heuristic_score: h, llm_score: score, final_score: f, category, llm_rationale: llm.rationale,
     safety_flags: JSON.stringify(llm.safety_flags), status, status_reason, updated_at: now,
   };
+}
+
+/** Pure: language signals from the scorer's JSON plus what Whisper heard. */
+export function languageSignalsOf(r: Record<string, unknown>, speech: { language: string | null; words: number } | null): LanguageSignals {
+  const txt = typeof r.onscreen_text_language === 'string' ? r.onscreen_text_language.toLowerCase() : null;
+  return {
+    speechLanguage: speech?.language ?? null, speechWords: speech?.words ?? 0,
+    dialogueDependent: typeof r.dialogue_dependent === 'boolean' ? r.dialogue_dependent : null,
+    onscreenTextLanguage: txt === 'none' || txt === 'english' || txt === 'other' ? txt : null,
+    onscreenTextEssential: typeof r.onscreen_text_essential === 'boolean' ? r.onscreen_text_essential : null,
+    culturalContextNeeded: typeof r.cultural_context_needed === 'boolean' ? r.cultural_context_needed : null,
+    worksMuted: r.works_muted == null ? null : Math.max(0, Math.min(10, Math.round(Number(r.works_muted) || 0))),
+  };
+}
+export function mergeMeta(json: string | null | undefined, patch: Record<string, unknown>): string {
+  let base: Record<string, unknown> = {};
+  try { base = json ? (JSON.parse(json) as Record<string, unknown>) : {}; } catch { base = {}; }
+  return JSON.stringify({ ...base, ...patch });
 }
 
 type LlmScoreWithRisk = LlmScoreResult & { copyright_risk?: string; copyright_risk_reasons?: string[]; visual_summary?: string | null; detected_handle?: string | null; detected_platform?: string | null };

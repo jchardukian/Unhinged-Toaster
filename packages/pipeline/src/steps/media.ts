@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { phashFrame, type Candidate } from '@toaster/shared';
 import { log } from '../config.js';
+import { withRetry } from '../retry.js';
 
 const execFileP = promisify(execFile);
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -73,8 +74,23 @@ export async function downloadMedia(c: Candidate, dir: string): Promise<string> 
     case 'reddit': return downloadReddit(c, out);
     case 'youtube': return downloadWithYtDlp(c.source_url, out, { youtube: true });
     case 'tiktok': return downloadWithYtDlp(c.source_url, out, {});
+    case 'ai_generated': {
+      if (fs.existsSync(out)) return out; // generated straight into the job folder by steps/aivideo.ts
+      throw new Error('ai_generated clip file missing (generation output was not kept)');
+    }
+    case 'wikimedia_commons':
+      if (!c.media_url) throw new Error('no media_url');
+      // upload.wikimedia.org rate-limits shared IPs with 429; back off and retry a few times before giving up
+      await withRetry(`commons download ${c.id}`, async () => {
+        const res = await fetch(c.media_url!, { headers: { 'user-agent': 'UnhingedToasterBot/0.1 (https://github.com/jchardukian/Unhinged-Toaster; theunhingedtoaster@gmail.com)' }, redirect: 'follow' });
+        if (res.status === 429 || res.status >= 500) throw new Error(`commons ${res.status}`);
+        if (!res.ok) throw new Error(`commons download ${res.status}`);
+        fs.writeFileSync(out, Buffer.from(await res.arrayBuffer()));
+      }, { attempts: 3, baseMs: 15000, shouldRetry: (e) => /commons (429|5\d\d)/.test(e.message) });
+      return out;
     default:
       if (!c.media_url) throw new Error('no media_url');
+      if (c.media_url.startsWith('file://')) { fs.copyFileSync(c.media_url.slice(7), out); return out; }
       await fetchToFile(c.media_url, out);
       return out;
   }
@@ -182,15 +198,24 @@ export function ytdlpCommonArgs(youtube: boolean, env: NodeJS.ProcessEnv = proce
   return args;
 }
 
-/** Metadata-only yt-dlp call (flat playlist for channel/user pages, or full info for a search/video). Several targets run in one process. */
-export async function ytdlpJson(target: string | string[], opts: { flat?: boolean; limit?: number; youtube?: boolean }): Promise<Record<string, unknown>[]> {
+/**
+ * Metadata-only yt-dlp call (flat playlist for channel/user pages, or full info for a search/video). Several targets run in one process.
+ * `embeddedMeta`: YouTube's embedded-player client answers from datacenter IPs where the default clients are bot-walled
+ * ("sign in to confirm you're not a bot"). It returns no media formats, but exact view / like counts, duration, upload
+ * date, channel, description and storyboards: enough to VERIFY a view count without cookies or an API key.
+ */
+export async function ytdlpJson(target: string | string[], opts: { flat?: boolean; limit?: number; youtube?: boolean; embeddedMeta?: boolean }): Promise<Record<string, unknown>[]> {
   const args = ['--no-warnings', '--skip-download', '--dump-json', '--ignore-errors'];
   if (opts.flat) args.push('--flat-playlist');
   if (opts.limit) args.push('--playlist-end', String(opts.limit));
+  if (opts.embeddedMeta) args.push('--ignore-no-formats-error', '--extractor-args', 'youtube:player_client=web_embedded');
   for (const a of ytdlpCommonArgs(opts.youtube ?? false)) args.push(a);
   args.push(...(Array.isArray(target) ? target : [target]));
-  const { stdout } = await execFileP('yt-dlp', args, { maxBuffer: 64 << 20 }).catch((e: { stdout?: string }) => ({ stdout: e.stdout ?? '' }));
-  return String(stdout).split('\n').filter((l) => l.trim().startsWith('{')).map((l) => { try { return JSON.parse(l) as Record<string, unknown>; } catch { return null; } }).filter((x): x is Record<string, unknown> => !!x);
+  const { stdout, stderr } = await execFileP('yt-dlp', args, { maxBuffer: 64 << 20 }).catch((e: { stdout?: string; stderr?: string }) => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? '' }));
+  const rows = String(stdout).split('\n').filter((l) => l.trim().startsWith('{')).map((l) => { try { return JSON.parse(l) as Record<string, unknown>; } catch { return null; } }).filter((x): x is Record<string, unknown> => !!x);
+  // an empty answer is usually a block (bot wall, geo, rate limit): keep the reason visible in the run log instead of a silent 0
+  if (rows.length === 0 && String(stderr).trim()) log.warn(`yt-dlp returned no rows for ${Array.isArray(target) ? `${target.length} targets` : target}: ${String(stderr).trim().split('\n').slice(-2).join(' / ').slice(0, 300)}`);
+  return rows;
 }
 
 export async function fetchToFile(url: string, file: string, headers: Record<string, string> = {}): Promise<void> {

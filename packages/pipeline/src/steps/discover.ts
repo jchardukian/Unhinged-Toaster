@@ -29,6 +29,7 @@ export async function discoverAll(cfg: Config, opts: DiscoverOptions): Promise<C
         : s === 'tiktok' ? await discoverTikTok(cfg, opts.limitPerSource)
         : s === 'youtube_search' ? await discoverYouTubeSearch(cfg, opts.limitPerSource)
         : s === 'youtube_viral' ? await discoverYouTubeViral(cfg, opts.limitPerSource)
+        : s === 'wikimedia_commons' ? await discoverWikimediaCommons(cfg, opts.limitPerSource)
         : [];
       log.info(`discover:${s} -> ${found.length} candidates`);
       out.push(...found);
@@ -70,11 +71,11 @@ interface PixabayHit {
   videos: Record<'large' | 'medium' | 'small' | 'tiny', { url: string; width: number; height: number; size: number }>;
 }
 
-export async function discoverPixabay(cfg: Config, limit: number): Promise<Candidate[]> {
+export async function discoverPixabay(cfg: Config, limit: number, queries: { q: string; category: ContentCategory }[] = CATEGORY_QUERIES): Promise<Candidate[]> {
   if (!cfg.pixabayKey) throw new Error('PIXABAY_API_KEY not set');
   const now = new Date().toISOString();
   const out: Candidate[] = [];
-  for (const { q, category } of CATEGORY_QUERIES) {
+  for (const { q, category } of queries) {
     const sp = new URLSearchParams({ key: cfg.pixabayKey, q, video_type: 'film', order: 'popular', safesearch: 'true', per_page: String(Math.min(200, Math.max(3, limit))) });
     const res = await withRetry(`pixabay ${q}`, () => fetch(`https://pixabay.com/api/videos/?${sp}`), { attempts: 3 });
     if (!res.ok) { log.warn(`pixabay ${q} -> ${res.status}`); continue; }
@@ -97,12 +98,12 @@ export async function discoverPixabay(cfg: Config, limit: number): Promise<Candi
 }
 
 // ---------------------------------------------------------------- Pexels (Pexels License: commercial OK)
-export async function discoverPexels(cfg: Config, limit: number): Promise<Candidate[]> {
+export async function discoverPexels(cfg: Config, limit: number, queries: { q: string; category: ContentCategory }[] = CATEGORY_QUERIES): Promise<Candidate[]> {
   if (!cfg.pexelsKey) throw new Error('PEXELS_API_KEY not set');
   const now = new Date().toISOString();
   const out: Candidate[] = [];
-  for (const { q, category } of CATEGORY_QUERIES) {
-    const res = await withRetry(`pexels ${q}`, () => fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(q)}&per_page=${Math.min(80, limit)}`, { headers: { authorization: cfg.pexelsKey! } }), { attempts: 3 });
+  for (const { q, category } of queries) {
+    const res = await withRetry(`pexels ${q}`, () => fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(q)}&per_page=${Math.min(80, limit)}&orientation=portrait`, { headers: { authorization: cfg.pexelsKey! } }), { attempts: 3 });
     if (!res.ok) { log.warn(`pexels ${q} -> ${res.status}`); continue; }
     const j = (await res.json()) as { videos: { id: number; url: string; duration: number; width: number; height: number; user: { name: string; url: string }; video_files: { link: string; width: number; height: number; quality: string }[] }[] };
     for (const v of j.videos) {
@@ -122,10 +123,9 @@ export async function discoverPexels(cfg: Config, limit: number): Promise<Candid
 // ---------------------------------------------------------------- Internet Archive (public domain / CC0 / CC BY items; short items only)
 interface IaDoc { identifier: string; title?: string; licenseurl?: string | string[]; downloads?: number; runtime?: string; creator?: string | string[]; description?: string | string[]; date?: string }
 
-export async function discoverInternetArchive(_cfg: Config, limit: number): Promise<Candidate[]> {
+export async function discoverInternetArchive(_cfg: Config, limit: number, subjects = ['funny', 'comedy', 'cats', 'dogs', 'animals', 'fail', 'blooper', 'slapstick']): Promise<Candidate[]> {
   const now = new Date().toISOString();
   const out: Candidate[] = [];
-  const subjects = ['funny', 'comedy', 'cats', 'dogs', 'animals', 'fail', 'blooper', 'slapstick'];
   const q = `mediatype:movies AND (licenseurl:(*publicdomain*) OR licenseurl:(*zero*) OR licenseurl:(*licenses\\/by\\/*)) AND (subject:(${subjects.join(' OR ')}) OR title:(${subjects.join(' OR ')}))`;
   const sp = new URLSearchParams({ q, rows: String(Math.min(200, limit * 3)), output: 'json', sort: 'downloads desc' });
   for (const f of ['identifier', 'title', 'licenseurl', 'downloads', 'runtime', 'creator', 'description', 'date']) sp.append('fl[]', f);
@@ -196,6 +196,8 @@ export const REDDIT_SOURCES: { sub: string; category: ContentCategory; guess?: b
   { sub: 'AnimalsBeingDerps', category: 'funny_animals' },
   { sub: 'AnimalsBeingJerks', category: 'funny_animals' },
   { sub: 'WhatsWrongWithYourDog', category: 'funny_animals' },
+  { sub: 'rarepuppers', category: 'funny_animals' },
+  { sub: 'dogvideos', category: 'funny_animals' },
   { sub: 'nextfuckinglevel', category: 'unbelievable' },
   { sub: 'ContagiousLaughter', category: 'wholesome_reactions' },
   { sub: 'MadeMeSmile', category: 'wholesome_reactions' },
@@ -255,6 +257,7 @@ export async function discoverRedditRss(cfg: Config, limit: number, windows: ('d
       const entries = parseRedditAtom(xml);
       entries.forEach((e, rank) => {
         if (!e.mediaId) return;
+        if (latinRatio(e.title) < 0.6) return; // English-language channel: titles in other scripts are skipped (same rule as YouTube)
         out.push({
           ...base('reddit', now),
           source_id: e.postId, source_url: e.link, media_url: `https://v.redd.it/${e.mediaId}/DASH_1080.mp4`,
@@ -278,12 +281,12 @@ export async function discoverRedditRss(cfg: Config, limit: number, windows: ('d
  * work through yt-dlp and expose per-video engagement. The owner curates `TIKTOK_ACCOUNTS` (original creators, not
  * compilation/licensing accounts); recent videos are ranked by views. Footage goes to transformation review.
  */
-export async function discoverTikTok(cfg: Config, limit: number, maxAgeDays = 14): Promise<Candidate[]> {
-  if (cfg.tiktokAccounts.length === 0) throw new Error('TIKTOK_ACCOUNTS not set (comma-separated creator handles)');
+export async function discoverTikTok(cfg: Config, limit: number, maxAgeDays = 14, handles: string[] = cfg.tiktokAccounts, minViews = 0): Promise<Candidate[]> {
+  if (handles.length === 0) throw new Error('TIKTOK_ACCOUNTS not set (comma-separated creator handles)');
   const now = new Date().toISOString();
   const out: Candidate[] = [];
   const minTs = Date.now() / 1000 - maxAgeDays * 86400;
-  for (const handle of cfg.tiktokAccounts) {
+  for (const handle of handles) {
     const rows = await ytdlpJson(`https://www.tiktok.com/@${handle}`, { flat: true, limit: Math.min(60, limit) }).catch(() => []);
     log.info(`tiktok @${handle}: ${rows.length} recent videos`);
     for (const r of rows) {
@@ -292,6 +295,7 @@ export async function discoverTikTok(cfg: Config, limit: number, maxAgeDays = 14
       const ts = Number(r.timestamp ?? 0);
       if (!id || dur < 4 || dur > 55) continue;
       if (ts && ts < minTs) continue;
+      if (minViews > 0 && (numOr(r.view_count) ?? 0) < minViews) continue;
       const title = String(r.title ?? r.description ?? '').trim() || `TikTok by @${handle}`;
       const prov = ccProvenanceRisk({ title, description: String(r.description ?? ''), channelTitle: handle, durationSec: dur });
       out.push({
@@ -373,6 +377,9 @@ export const YT_VIRAL_TAGS: { tag: string; category: ContentCategory }[] = [
   { tag: 'instantkarma', category: 'people_fails' }, { tag: 'funnyvideos', category: 'people_fails' }, { tag: 'comedy', category: 'people_fails' },
   { tag: 'funnyanimals', category: 'funny_animals' }, { tag: 'funnycats', category: 'funny_animals' }, { tag: 'funnydogs', category: 'funny_animals' },
   { tag: 'cats', category: 'funny_animals' }, { tag: 'dogs', category: 'funny_animals' }, { tag: 'animals', category: 'funny_animals' },
+  // funny-dog focus (owner priority): breed and dog-meme shelves surface single-creator virals the generic tags miss
+  { tag: 'funnydog', category: 'funny_animals' }, { tag: 'dog', category: 'funny_animals' }, { tag: 'dogfails', category: 'funny_animals' }, { tag: 'dogmemes', category: 'funny_animals' },
+  { tag: 'puppy', category: 'funny_animals' }, { tag: 'husky', category: 'funny_animals' }, { tag: 'goldenretriever', category: 'funny_animals' }, { tag: 'corgi', category: 'funny_animals' },
   { tag: 'unexpected', category: 'unbelievable' }, { tag: 'waitforit', category: 'unbelievable' }, { tag: 'caughtoncamera', category: 'unbelievable' },
   { tag: 'wholesome', category: 'wholesome_reactions' }, { tag: 'heartwarming', category: 'wholesome_reactions' }, { tag: 'reaction', category: 'wholesome_reactions' },
 ];
@@ -442,6 +449,17 @@ export async function discoverYouTubeViral(cfg: Config, limit: number, windows: 
       const items = await youtubeVideosApi(cfg.youtubeKey, picked.slice(i, i + 50).map((r) => r.id)).catch((e) => { log.warn(`youtube_viral Data API: ${(e as Error).message}`); return [] as YtVideo[]; });
       for (const it of items) meta.set(it.id, ytMetaFromApi(it));
     }
+  }
+  // Embedded-player client: exact views / likes / duration / upload date from datacenter IPs where the default
+  // clients are bot-walled (no media formats, so width/height stay unknown until download). No cookies, no key.
+  if (meta.size < picked.length) {
+    for (let i = 0; i < picked.length; i += 20) {
+      const missing = picked.slice(i, i + 20).filter((r) => !meta.has(r.id));
+      if (missing.length === 0) continue;
+      const full = await ytdlpJson(missing.map((r) => `https://www.youtube.com/watch?v=${r.id}`), { youtube: true, embeddedMeta: true }).catch(() => []);
+      for (const m of full) if (m.id && m.view_count != null) meta.set(String(m.id), m);
+    }
+    log.info(`youtube_viral embedded-player metadata: ${meta.size}/${picked.length}`);
   }
   if (meta.size < picked.length && (!cfg.youtubeKey || !youtubeFetchGuard(cfg).blocked)) {
     for (let i = 0; i < picked.length; i += 20) {
@@ -527,7 +545,7 @@ export function ytMetaFromApi(it: YtVideo): Record<string, unknown> {
  */
 export function youtubeFetchGuard(cfg: Pick<Config, 'ytdlpCookiesB64'>, env: NodeJS.ProcessEnv = process.env): { blocked: boolean; reason: string } {
   if (env.YTDLP_ASSUME_FETCHABLE === 'true' || cfg.ytdlpCookiesB64) return { blocked: false, reason: '' };
-  if (env.GITHUB_ACTIONS === 'true') return { blocked: true, reason: 'GitHub-hosted runner without YTDLP_COOKIES_B64: YouTube answers "sign in to confirm you\'re not a bot" (0/40 in the CI probe)' };
+  if (env.GITHUB_ACTIONS === 'true') return { blocked: true, reason: 'GitHub-hosted runner without YTDLP_COOKIES_B64: YouTube answers "sign in to confirm you\'re not a bot" for every player client, web_embedded included (fetch probe 2026-11-07: 0/6 downloads; metadata still works)' };
   return { blocked: false, reason: '' };
 }
 
@@ -717,4 +735,77 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function dedupeById(cs: Candidate[]): Candidate[] {
   const seen = new Set<string>();
   return cs.filter((c) => { const k = `${c.source_platform}:${c.source_id}`; if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+/** Licensed stock queries for real-dog rankings (Pexels / Pixabay only: commercial reuse + modification allowed). */
+export const DOG_STOCK_QUERIES: { q: string; category: ContentCategory }[] = [
+  { q: 'funny dog', category: 'funny_animals' }, { q: 'dog fail', category: 'funny_animals' }, { q: 'dog zoomies', category: 'funny_animals' },
+  { q: 'dog slips', category: 'funny_animals' }, { q: 'puppy playing', category: 'funny_animals' }, { q: 'dog jumping', category: 'funny_animals' },
+  { q: 'dog running into', category: 'funny_animals' }, { q: 'dog confused', category: 'funny_animals' }, { q: 'dog costume', category: 'funny_animals' },
+  { q: 'dog steals food', category: 'funny_animals' }, { q: 'dog bath', category: 'funny_animals' }, { q: 'dog snow', category: 'funny_animals' },
+];
+
+// ---------------------------------------------------------------- Viral funny-dog discovery (YouTube hashtag Shorts shelves, Reddit dog subs, TikTok creators)
+/** YouTube hashtag Shorts shelves scanned for viral dog clips (no key, no cookies). Breed tags catch single-creator virals the generic tags miss. */
+export const YT_DOG_TAGS = [
+  'funnydogs', 'funnydog', 'dogs', 'dog', 'dogsoftiktok', 'doglover', 'dogshorts', 'dogvideos', 'dogfails', 'dogmemes', 'puppy', 'puppies',
+  'funnypets', 'funnyanimals', 'pets', 'husky', 'goldenretriever', 'corgi', 'frenchie', 'dachshund', 'chihuahua', 'germanshepherd', 'labrador', 'pitbull',
+];
+/** Reddit communities where funny dog clips surface (RSS, no credentials). `filter` = keep only dog-looking titles in mixed-animal subs. */
+export const REDDIT_DOG_SOURCES: { sub: string; category: ContentCategory; guess?: boolean; filter?: boolean }[] = [
+  { sub: 'WhatsWrongWithYourDog', category: 'funny_animals' }, { sub: 'rarepuppers', category: 'funny_animals' }, { sub: 'dogvideos', category: 'funny_animals' },
+  { sub: 'Zoomies', category: 'funny_animals', filter: true }, { sub: 'dogswithjobs', category: 'funny_animals' }, { sub: 'puppies', category: 'funny_animals' },
+  { sub: 'AnimalsBeingDerps', category: 'funny_animals', filter: true }, { sub: 'AnimalsBeingJerks', category: 'funny_animals', filter: true },
+  { sub: 'TikTokCringe', category: 'funny_animals', filter: true }, { sub: 'funnyvideos', category: 'funny_animals', filter: true },
+];
+const DOG_WORDS = /\b(dogs?|doggo|doggy|pupp(y|ies|er|ers)|pups?|canine|k9|hound|husky|huskies|corgis?|frenchie|bulldogs?|retrievers?|labs?|labrador|shepherd|beagle|dachshund|chihuahua|poodle|pitbull|pittie|terrier|dobermans?|rottweiler|mastiff|shiba|akita|samoyed|malinois|pomeranian|shih tzu|cocker|collie|great dane|cane corso|mutt|rescue pup)\b/i;
+/** Pure: does the text look like it is about a dog? Used to keep dog clips out of mixed-animal / mixed-content feeds. */
+export function isDogText(text: string): boolean { return DOG_WORDS.test(text); }
+
+// ---------------------------------------------------------------- Wikimedia Commons (no key; CC0 / public domain / CC BY videos with machine-readable license metadata)
+export const COMMONS_UA = 'UnhingedToasterBot/0.1 (https://github.com/jchardukian/Unhinged-Toaster; theunhingedtoaster@gmail.com)';
+export const COMMONS_DOG_QUERIES = ['dog funny', 'dog playing', 'puppy', 'dog jumping', 'dog running', 'dog swimming', 'dog snow', 'dog toy'];
+
+interface CommonsPage { title: string; pageid: number; imageinfo?: { url: string; descriptionurl?: string; mime?: string; width?: number; height?: number; duration?: number; extmetadata?: Record<string, { value: string }> }[] }
+
+/** Pure: turn a Commons API page into a candidate (or null when the license is not CC0 / PD / CC BY, or the file is not a usable video). */
+export function commonsCandidate(p: CommonsPage, now: string): Candidate | null {
+  const ii = p.imageinfo?.[0];
+  if (!ii || !/^video\//.test(ii.mime ?? '')) return null;
+  const em = ii.extmetadata ?? {};
+  const license = em.LicenseShortName?.value ?? '';
+  const artist = (em.Artist?.value ?? '').replace(/<[^>]+>/g, '').trim() || null;
+  const dur = Number(ii.duration ?? 0);
+  if (!dur || dur < 4 || dur > 90) return null;
+  const rights = initialRights('wikimedia_commons', { license, evidenceSuffix: ii.descriptionurl ?? `https://commons.wikimedia.org/wiki/${encodeURIComponent(p.title)}` });
+  if (rights.rights_status !== 'cleared') return null;
+  const title = p.title.replace(/^File:/, '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
+  return {
+    id: ulid(), discovered_at: now, updated_at: now, status: 'discovered', status_reason: null, heuristic_score: null, llm_score: null, final_score: null, llm_rationale: null, safety_flags: null,
+    phash: null, duplicate_of: null, attribution_text: null, category: 'funny_animals', source_platform: 'wikimedia_commons', copyright_risk: null, copyright_risk_reasons: null,
+    source_id: String(p.pageid), source_url: ii.descriptionurl ?? `https://commons.wikimedia.org/wiki/${encodeURIComponent(p.title)}`, media_url: ii.url, author: artist, author_url: null,
+    title, description: (em.ImageDescription?.value ?? '').replace(/<[^>]+>/g, '').slice(0, 300) || null, duration_sec: dur, width: ii.width ?? null, height: ii.height ?? null,
+    published_at: null, views: null, likes: null, comments: null, shares: null, engagement_velocity: null, ...rights,
+  } as Candidate;
+}
+
+export async function discoverWikimediaCommons(_cfg: Config, limit: number, queries: string[] = COMMONS_DOG_QUERIES): Promise<Candidate[]> {
+  const now = new Date().toISOString();
+  const out: Candidate[] = [];
+  for (const q of queries) {
+    const sp = new URLSearchParams({ action: 'query', format: 'json', generator: 'search', gsrsearch: `filetype:video ${q}`, gsrnamespace: '6', gsrlimit: String(Math.min(50, limit)), prop: 'imageinfo', iiprop: 'url|size|extmetadata|mime', iiextmetadatafilter: 'LicenseShortName|Artist|LicenseUrl|ImageDescription' });
+    let res: Response;
+    try {
+      res = await withRetry(`commons ${q}`, async () => {
+        const r = await fetch(`https://commons.wikimedia.org/w/api.php?${sp}`, { headers: { 'user-agent': COMMONS_UA, accept: 'application/json' }, redirect: 'follow' });
+        if (r.status === 429 || r.status >= 500) throw new Error(`commons ${r.status}`);
+        return r;
+      }, { attempts: 3, baseMs: 10000 });
+    } catch (e) { log.warn(`commons "${q}": ${(e as Error).message} (Wikimedia rate-limits shared IPs; skipped)`); continue; }
+    if (!res.ok) { log.warn(`commons "${q}" -> ${res.status}`); continue; }
+    const j = (await res.json()) as { query?: { pages?: Record<string, CommonsPage> } };
+    for (const p of Object.values(j.query?.pages ?? {})) { const c = commonsCandidate(p, now); if (c) out.push(c); }
+    await sleep(2000);
+  }
+  return dedupeById(out);
 }

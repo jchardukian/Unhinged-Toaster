@@ -1,0 +1,65 @@
+name: Dog shortlist (discovery only, never publishes)
+
+# Viral funny-dog discovery: YouTube hashtag Shorts shelves (1M+ views verified through the embedded-player metadata),
+# TikTok creator pages (handles from TIKTOK_ACCOUNTS / the input / watermarks), Reddit dog communities. Scores comedy
+# with the LLM and writes a ranked shortlist as an artifact. Stores nothing, renders nothing, creates no Buffer posts.
+on:
+  workflow_dispatch:
+    inputs:
+      top:
+        description: 'Shortlist length'
+        default: '30'
+      limit:
+        description: 'Max candidates scored per platform (API cost ~ $0.003 each)'
+        default: '60'
+      tiktok_handles:
+        description: 'Optional comma-separated TikTok creator handles to scan (no @)'
+        default: ''
+      budget:
+        description: 'API budget in USD for this run'
+        default: '2'
+
+concurrency:
+  group: toaster-dog-shortlist
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  shortlist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && pip install -q "yt-dlp[default]"
+        timeout-minutes: 5
+      - run: npm ci && npm run build
+        timeout-minutes: 5
+      - name: dog-shortlist
+        timeout-minutes: 35
+        env:
+          API_BUDGET_USD: ${{ inputs.budget }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          TIKTOK_ACCOUNTS: ${{ vars.TIKTOK_ACCOUNTS }}
+          REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
+          MAX_COPYRIGHT_RISK: ${{ vars.MAX_COPYRIGHT_RISK || 'medium' }}
+          WORK_DIR: ./work
+        run: node packages/pipeline/dist/cli.js dog-shortlist --top "${{ inputs.top }}" --limit "${{ inputs.limit }}" ${{ inputs.tiktok_handles && format('--tiktok-handles {0}', inputs.tiktok_handles) || '' }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dog-shortlist
+          path: |
+            work/dog-shortlist.md
+            work/dog-shortlist.json
+            work/dog-shortlist/*_sheet.jpg
+            work/usage.jsonl
+          if-no-files-found: ignore
+          retention-days: 14

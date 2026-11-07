@@ -53,7 +53,7 @@ export interface Config {
   bufferTagReviewId: string | undefined;
   bufferTagClearedId: string | undefined;
   contactEmail: string;
-  commentaryDefault: 'auto' | 'always' | 'never';
+  commentaryDefault: 'auto' | 'always' | 'never' | 'text_only';
   allowLowQuality: boolean;
   musicDefault: 'auto' | 'always' | 'never';
   stickers: boolean;
@@ -76,6 +76,17 @@ export interface Config {
   r2: { accountId?: string; accessKeyId?: string; secretAccessKey?: string; bucket: string; publicBaseUrl?: string };
   apiUrl: string | undefined;
   apiToken: string | undefined;
+  /** Unattended publishing (autopilot): off unless UNATTENDED_PUBLISHING=true AND the owner's exact phrase is set. */
+  unattended: boolean;
+  unattendedAuthorization: string | undefined;
+  emergencyStop: boolean;
+  unattendedMinQc: number;
+  /** keep drafting transformation-review videos for optional owner approval while autopilot runs (default false) */
+  unattendedReviewDrafts: boolean;
+  /** owner policy: schedule productions whose fair-use assessment is "supportable" (uncertain ones are never scheduled) */
+  unattendedFairUse: boolean;
+  /** owner policy: model-rated copyright risk still accepted for a supportable fair-use verdict ('low' default | 'medium') */
+  fairUseMaxRisk: 'low' | 'medium';
   workDir: string;
   assetsDir: string;
   templateDir: string;
@@ -113,7 +124,7 @@ export function loadConfig(): Config {
     youtubeViralWindows: (e.YOUTUBE_VIRAL_WINDOWS || 'today,week,month,alltime').split(',').map((x) => x.trim()).filter((x): x is 'today' | 'week' | 'month' | 'alltime' => ['today', 'week', 'month', 'alltime'].includes(x)),
     redditWindows: (e.REDDIT_WINDOWS || 'day,week').split(',').map((x) => x.trim()).filter((x): x is 'day' | 'week' | 'month' => ['day', 'week', 'month'].includes(x)),
     musicDefault: (['auto', 'always', 'never'].includes(e.MUSIC_DEFAULT ?? '') ? e.MUSIC_DEFAULT : 'auto') as 'auto' | 'always' | 'never',
-    commentaryDefault: (['auto', 'always', 'never'].includes(e.COMMENTARY_DEFAULT ?? '') ? e.COMMENTARY_DEFAULT : 'auto') as 'auto' | 'always' | 'never',
+    commentaryDefault: (['auto', 'always', 'never', 'text_only'].includes(e.COMMENTARY_DEFAULT ?? '') ? e.COMMENTARY_DEFAULT : 'auto') as 'auto' | 'always' | 'never' | 'text_only',
     youtubeKey: e.YOUTUBE_API_KEY,
     enableYoutubeCc: e.ENABLE_YOUTUBE_CC === 'true',
     enableYoutubeTransform: e.ENABLE_YOUTUBE_TRANSFORM !== 'false',
@@ -129,6 +140,13 @@ export function loadConfig(): Config {
     r2: { accountId: e.R2_ACCOUNT_ID, accessKeyId: e.R2_ACCESS_KEY_ID, secretAccessKey: e.R2_SECRET_ACCESS_KEY, bucket: e.R2_BUCKET ?? 'toaster-media', publicBaseUrl: e.R2_PUBLIC_BASE_URL },
     apiUrl: e.TOASTER_API_URL || deployedWorkerUrl(root),
     apiToken: e.TOASTER_API_TOKEN,
+    unattended: e.UNATTENDED_PUBLISHING === 'true',
+    unattendedAuthorization: e.UNATTENDED_AUTHORIZATION,
+    emergencyStop: e.EMERGENCY_STOP === 'true',
+    unattendedMinQc: Number(e.UNATTENDED_MIN_QC) > 0 ? Number(e.UNATTENDED_MIN_QC) : 7,
+    unattendedReviewDrafts: e.UNATTENDED_REVIEW_DRAFTS === 'true',
+    unattendedFairUse: e.UNATTENDED_FAIR_USE === 'true',
+    fairUseMaxRisk: e.UNATTENDED_FAIR_USE_MAX_RISK === 'medium' ? 'medium' : 'low',
     workDir: path.resolve(root, e.WORK_DIR ?? 'work'),
     assetsDir: path.join(root, 'assets'),
     templateDir: path.join(root, 'template'),

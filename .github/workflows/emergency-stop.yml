@@ -1,0 +1,35 @@
+name: Emergency stop (pause unattended publishing)
+
+# Pauses unattended publishing in the control plane and deletes every pending (not yet published) scheduled post from
+# Buffer. Safe to run at any time; drafts are untouched. Resume with `toaster resume` after setting the variables again.
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why (recorded in the decision log)'
+        default: 'owner emergency stop'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci && npm run build
+      - name: stop
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          TOASTER_API_URL: ${{ vars.TOASTER_API_URL }}
+          TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
+          ALERT_WEBHOOK_URL: ${{ vars.ALERT_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+          WORK_DIR: ./work
+        run: node packages/pipeline/dist/cli.js stop --reason "${{ inputs.reason }}"

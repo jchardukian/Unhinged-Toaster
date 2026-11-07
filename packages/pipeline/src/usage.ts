@@ -14,6 +14,8 @@ export interface Usage {
   render_seconds: number;
   renders: number;
   upload_bytes: number;
+  /** AI video generation per provider: attempts, accepted, generated seconds, provider charge (USD, from the provider's published rate) */
+  video_gen: Record<string, { attempts: number; accepted: number; rejected: number; seconds: number; usd: number }>;
   started_at: string;
 }
 
@@ -29,7 +31,7 @@ const WHISPER_PER_MIN = 0.006;
 const TTS_PER_1K_CHARS = 0.30; // ElevenLabs Creator plan: $22 for 100k credits ≈ $0.22/1k; Starter $5/30k ≈ $0.17/1k; 0.30 covers overage pricing
 const R2_PER_GB_MONTH = 0.015;
 
-const usage: Usage = { llm: {}, whisper_seconds: 0, tts_chars: 0, tts_calls: 0, render_seconds: 0, renders: 0, upload_bytes: 0, started_at: new Date().toISOString() };
+const usage: Usage = { llm: {}, whisper_seconds: 0, tts_chars: 0, tts_calls: 0, render_seconds: 0, renders: 0, upload_bytes: 0, video_gen: {}, started_at: new Date().toISOString() };
 
 export function recordLlm(model: string, promptTokens: number, completionTokens: number): void {
   const m = (usage.llm[model] ??= { calls: 0, prompt_tokens: 0, completion_tokens: 0 });
@@ -39,6 +41,16 @@ export function recordWhisper(seconds: number): void { usage.whisper_seconds += 
 export function recordTts(chars: number): void { usage.tts_chars += chars; usage.tts_calls++; }
 export function recordRender(seconds: number): void { usage.render_seconds += seconds; usage.renders++; }
 export function recordUpload(bytes: number): void { usage.upload_bytes += bytes; }
+export function recordVideoGen(provider: string, seconds: number, usd: number, outcome: 'accepted' | 'rejected' | 'failed' | 'pending' = 'pending'): void {
+  const v = (usage.video_gen[provider] ??= { attempts: 0, accepted: 0, rejected: 0, seconds: 0, usd: 0 });
+  v.attempts++; v.seconds += seconds; v.usd += usd;
+  if (outcome === 'accepted') v.accepted++; else if (outcome === 'rejected' || outcome === 'failed') v.rejected++;
+}
+export function recordVideoOutcome(provider: string, outcome: 'accepted' | 'rejected'): void {
+  const v = (usage.video_gen[provider] ??= { attempts: 0, accepted: 0, rejected: 0, seconds: 0, usd: 0 });
+  if (outcome === 'accepted') v.accepted++; else v.rejected++;
+}
+export function videoGenUsd(): number { return Object.values(usage.video_gen).reduce((a, v) => a + v.usd, 0); }
 export function currentUsage(): Usage { return JSON.parse(JSON.stringify(usage)) as Usage; }
 
 function prices(): Record<string, { in: number; out: number }> {
@@ -50,7 +62,7 @@ export function priceFor(model: string): { in: number; out: number } {
   return p[model] ?? p[Object.keys(p).find((k) => model.startsWith(k)) ?? ''] ?? { in: 2.5, out: 10 }; // unknown model: price as gpt-4o (conservative)
 }
 
-export interface UsageCost { llm_usd: number; whisper_usd: number; tts_usd: number; storage_usd_per_month: number; total_usd: number; lines: string[] }
+export interface UsageCost { llm_usd: number; whisper_usd: number; tts_usd: number; video_usd: number; storage_usd_per_month: number; total_usd: number; lines: string[] }
 
 export function costOf(u: Usage): UsageCost {
   const lines: string[] = [];
@@ -65,20 +77,25 @@ export function costOf(u: Usage): UsageCost {
   if (u.whisper_seconds) lines.push(`Whisper: ${(u.whisper_seconds / 60).toFixed(1)} min = $${whisper.toFixed(4)}`);
   const tts = (u.tts_chars / 1000) * TTS_PER_1K_CHARS;
   if (u.tts_calls) lines.push(`ElevenLabs: ${u.tts_calls} lines, ${u.tts_chars} chars ≈ $${tts.toFixed(4)} (plan-dependent; $${TTS_PER_1K_CHARS}/1k assumed)`);
+  let video = 0;
+  for (const [prov, v] of Object.entries(u.video_gen ?? {})) {
+    video += v.usd;
+    lines.push(`AI video ${prov}: ${v.attempts} attempts (${v.accepted} accepted, ${v.rejected} rejected), ${v.seconds.toFixed(0)} s generated = $${v.usd.toFixed(2)}${v.accepted ? ` → $${(v.usd / v.accepted).toFixed(2)} per accepted clip` : ''}`);
+  }
   const storage = (u.upload_bytes / 1e9) * R2_PER_GB_MONTH;
   if (u.renders) lines.push(`Render: ${u.renders} videos, ${(u.render_seconds / 60).toFixed(1)} CPU-min (GitHub Actions minutes; free for public repos, 2 000/month free for private)`);
   if (u.upload_bytes) lines.push(`Storage: ${(u.upload_bytes / 1e6).toFixed(1)} MB uploaded ≈ $${storage.toFixed(4)}/month on R2 (10 GB free)`);
-  return { llm_usd: llm, whisper_usd: whisper, tts_usd: tts, storage_usd_per_month: storage, total_usd: llm + whisper + tts, lines };
+  return { llm_usd: llm, whisper_usd: whisper, tts_usd: tts, video_usd: video, storage_usd_per_month: storage, total_usd: llm + whisper + tts + video, lines };
 }
 
 /** Append this run's counters to <workDir>/usage.jsonl (one JSON line per run) and return the summary lines. */
 export function flushUsage(workDir: string, label: string): string[] {
   const c = costOf(usage);
-  const hasAny = Object.keys(usage.llm).length || usage.whisper_seconds || usage.tts_calls || usage.renders || usage.upload_bytes;
+  const hasAny = Object.keys(usage.llm).length || usage.whisper_seconds || usage.tts_calls || usage.renders || usage.upload_bytes || Object.keys(usage.video_gen).length;
   if (hasAny) {
     try {
       fs.mkdirSync(workDir, { recursive: true });
-      fs.appendFileSync(path.join(workDir, 'usage.jsonl'), JSON.stringify({ label, ended_at: new Date().toISOString(), ...usage, cost: { llm_usd: c.llm_usd, whisper_usd: c.whisper_usd, tts_usd: c.tts_usd, total_usd: c.total_usd } }) + '\n');
+      fs.appendFileSync(path.join(workDir, 'usage.jsonl'), JSON.stringify({ label, ended_at: new Date().toISOString(), ...usage, cost: { llm_usd: c.llm_usd, whisper_usd: c.whisper_usd, tts_usd: c.tts_usd, video_usd: c.video_usd, total_usd: c.total_usd } }) + '\n');
     } catch { /* usage logging must never break a run */ }
   }
   return [...c.lines, `Total API cost this run: $${c.total_usd.toFixed(4)}`];
@@ -92,11 +109,12 @@ export function readUsageLog(workDir: string): Usage[] {
 }
 
 export function sumUsage(list: Usage[]): Usage {
-  const out: Usage = { llm: {}, whisper_seconds: 0, tts_chars: 0, tts_calls: 0, render_seconds: 0, renders: 0, upload_bytes: 0, started_at: list[0]?.started_at ?? new Date().toISOString() };
+  const out: Usage = { llm: {}, whisper_seconds: 0, tts_chars: 0, tts_calls: 0, render_seconds: 0, renders: 0, upload_bytes: 0, video_gen: {}, started_at: list[0]?.started_at ?? new Date().toISOString() };
   for (const u of list) {
     for (const [m, v] of Object.entries(u.llm ?? {})) { const t = (out.llm[m] ??= { calls: 0, prompt_tokens: 0, completion_tokens: 0 }); t.calls += v.calls; t.prompt_tokens += v.prompt_tokens; t.completion_tokens += v.completion_tokens; }
     out.whisper_seconds += u.whisper_seconds ?? 0; out.tts_chars += u.tts_chars ?? 0; out.tts_calls += u.tts_calls ?? 0;
     out.render_seconds += u.render_seconds ?? 0; out.renders += u.renders ?? 0; out.upload_bytes += u.upload_bytes ?? 0;
+    for (const [prov, v] of Object.entries(u.video_gen ?? {})) { const t = (out.video_gen[prov] ??= { attempts: 0, accepted: 0, rejected: 0, seconds: 0, usd: 0 }); t.attempts += v.attempts; t.accepted += v.accepted; t.rejected += v.rejected; t.seconds += v.seconds; t.usd += v.usd; }
   }
   return out;
 }

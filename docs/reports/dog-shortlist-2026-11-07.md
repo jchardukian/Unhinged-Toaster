@@ -1,0 +1,59 @@
+## Viral funny-dog shortlist (discovery only; nothing stored, rendered, drafted or published)
+
+- videos with >= 1,000,000 VERIFIED views: YouTube 159, TikTok 0 (Reddit: 0 dog clips, views not exposed)
+- scored by the dog-comedy rubric: 93; passed every gate (clear payoff, single clip, quality, safety, comedy >= 50): 54; duplicates removed: 27
+- shortlist (top 30 of 40 rankable = single real-dog clips that are not compilations, low quality, AI fakes, unsafe or rights-blocked; "gate" shows the ones below the comedy bar): rights cleared 0, review-eligible (no licence on file; owner decides per draft) 30, blocked 0
+- API spend: $0.536 of the $2.00 budget (metered $0.536); elapsed 966 s
+
+### Discovery methods (no paid APIs)
+- YouTube hashtag Shorts shelves (24 dog tags) + embedded-player metadata: 864 shelf rows -> 630 unique -> 376 at/near 1M -> 160/240 metadata verified -> 159 with >= 1,000,000 verified views (dropped: {"too_long_for_short":1})
+- YouTube frames without download: 120/120 clips had 3 CDN frames for vision scoring
+- TikTok: no creator handles available (TIKTOK_ACCOUNTS empty, none read from watermarks); tag / search / discover pages return no items from a server (re-checked today), so TikTok found 0
+
+### Top 30
+
+| # | title | platform | views | url | comedy | gate | dur | rights | views/h | channel | payoff |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | He Just Wanted a Sip… Then THIS Happened 😂🐶🍷 | youtube | 29,357,111 | https://www.youtube.com/shorts/Xm2dOTnqtYQ | 91.5 | pass | 16 s | review-eligible (no licence; risk low; owner decides per draft) | 46k | Tom&JERRY | The Chihuahua's failed attempts to clean up the spilled wine, leading to an even bigger mess. |
+| 2 | Chico Saw A Skateboard… Grandpa Saw His Dog Leave 🛹🐶😂 | youtube | 11,086,902 | https://www.youtube.com/shorts/h30U_eedO-k | 91.5 | pass | 15 s | review-eligible (no licence; risk low; owner decides per draft) | 11k | Nowhere Else | Chico confidently rides the skateboard and then sits down like a pro. |
+| 3 | He Picked the WRONG House 😂🐶 | youtube | 17,041,632 | https://www.youtube.com/shorts/k5XNqIFb_BU | 84.5 | pass | 17 s | review-eligible (no licence; risk low; owner decides per draft) | 63k | Tom&JERRY | The Chihuahua, dressed like a tough character, stands defiantly with a bat, only for the scene to shift to a big dog in a similar outfit, adding a humorous twist. |
+| 4 | He Was SO Scared of the Dog… He Climbed the CEILING! 🐕😭 | youtube | 14,673,661 | https://www.youtube.com/shorts/q8dPoQ9wdps | 84.5 | pass | 23 s | review-eligible (no licence; risk low; owner decides per draft) | 57k | Plot Riot | The moment the girl is seen hanging from a bar above the dog, showcasing her exaggerated fear. |
+| 5 | Cún cưng "hồn siêu phách lạc" khi thấy... chính mình bị cắt đôi! | youtube | 17,693,057 | https://www.youtube.com/shorts/amnaKZ9PSW8 | 84.5 | pass | 10 s | review-eligible (no licence; risk low; owner decides per draft) | 37k | Nhiều Thứ Hay Ho | The dog's startled expression and frantic retreat after seeing its cake doppelgänger cut in half. |
+| 6 | Cherry Pushed Storm Down the Slide… Then Karma Hit 🦆 | youtube | 51,289,680 | https://www.youtube.com/shorts/pdpVfw36Xg0 | 84.5 | pass | 14 s | review-eligible (no licence; risk low; owner decides per draft) | 35k | Storm And Cherry | Storm's surprised expression as he slides down unexpectedly. |
+| 7 | O TUBARÃO PEGOU O BURRITO?! 🦈🌯 Cane Corso vs Chihuahua: O Desafio de | youtube | 223,571,547 | https://www.youtube.com/shorts/fDHowAhUtvA | 84.5 | pass | 10 s | review-eligible (no licence; risk low; owner decides per draft) | 33k | Biruleibe IA | The Cane Corso lunges forward to grab the treats, humorously embodying its shark costume. |
+| 8 | He Stole Their Phone… Then THIS Happened 😂 | youtube | 24,091,558 | https://www.youtube.com/shorts/5D1ePQ3SINk | 84.5 | pass | 16 s | review-eligible (no licence; risk low; owner decides per draft) | 27k | Tom&JERRY | The unexpected twist of the muscular figure stealing the phone while the dogs are engrossed in it. |
+| 9 | #bts #btsshorts #core | youtube | 10,638,660 | https://www.youtube.com/shorts/5ZfoI0R1QFU | 84.5 | pass | 22 s | review-eligible (no licence; risk low; owner decides per draft) | 23k | GEEK MOVIES | The dog hilariously collides with the wall while trying to find its way. |
+| 10 | Dachshund and Her Automatic Ball Launcher | youtube | 62,983,801 | https://www.youtube.com/shorts/ZEsG8rHb0SI | 84.5 | pass | 6 s | review-eligible (no licence; risk low; owner decides per draft) | 20k | Daisy the Dachshund | The instant the ball launches, the dachshund is already in motion, showcasing her excitement and speed. |
+| 11 | Tiny Chihuahua Tries to Hide a BLACK HOLE in Bed! 🕳️😂 | youtube | 21,213,938 | https://www.youtube.com/shorts/y4MGfBLc0mM | 83 | pass | 15 s | review-eligible (no licence; risk low; owner decides per draft) | 33k | Loki & Thor | The Chihuahua's exaggerated panic as it attempts to hide the laptop, creating a humorous scenario. |
+| 12 | NEVER eat cake around her dog! 😳🐶#shorts #funny #dogmemes #cake | youtube | 14,775,980 | https://www.youtube.com/shorts/OS5Lo3b-7CE | 84.5 | pass | 15 s | review-eligible (no licence; risk low; owner decides per draft) | 16k | Marjorie Lucy | The woman's shocked reaction when she realizes something is off with the dog. |
+| 13 | I cooked a chicken leg for my dog… in a popcorn machine. 🐶🍗😭 | youtube | 49,120,930 | https://www.youtube.com/shorts/KQ3Abw3fcSw | 83 | pass | 54 s | review-eligible (no licence; risk low; owner decides per draft) | 32k | RickyStudio | The dog's ecstatic reaction when finally getting the chicken leg. |
+| 14 | your other left😂 Storm the Frenchie #frenchie #dance #funny #frenchbu | youtube | 26,027,013 | https://www.youtube.com/shorts/KaE7J9UO0vw | 84.5 | pass | 5 s | review-eligible (no licence; risk low; owner decides per draft) | 16k | Dylan Novak | The dog hilariously turns the wrong way when prompted, leading to a comedic misunderstanding. |
+| 15 | He gave my dog a haircut in 5 seconds    💀#dogmemes #couplescomedy #d | youtube | 10,835,189 | https://www.youtube.com/shorts/bmj6pR1fBN8 | 84.5 | pass | 15 s | review-eligible (no licence; risk low; owner decides per draft) | 16k | Eidt Downes | The comedic payoff is the dog's confused expression after the haircut attempt and the unexpected hat. |
+| 16 | Does yours steal stuff too?😂🐕 #dachshund #funnydogs #subway #kids #t | youtube | 6,267,591 | https://www.youtube.com/shorts/sBpXVnMrY8M | 84.5 | pass | 11 s | review-eligible (no licence; risk low; owner decides per draft) | 15k | Dozora ☁️ | The dog wearing the pillow, making it look like it fits better than the child. |
+| 17 | Nacho Picks My Outfit | youtube | 12,755,456 | https://www.youtube.com/shorts/gGeE-8ApDRc | 84.5 | pass | 14 s | review-eligible (no licence; risk low; owner decides per draft) | 13k | Matias & Nacho | Nacho picks the most outrageous outfit, leading to the man's humorous regret. |
+| 18 | 🤣🤣Advance Happy diwali🤣🤣watch till end😂 #labrador #doglover #gold | youtube | 7,158,357 | https://www.youtube.com/shorts/OmxK-Ej0pNo | 84.5 | pass | 41 s | review-eligible (no licence; risk low; owner decides per draft) | 13k | Greebloo | The dog playfully snatches the fake cracker from the man's hand, surprising him. |
+| 19 | Man Playing Arrow Game With Three Dogs #shorts #paw | youtube | 8,572,764 | https://www.youtube.com/shorts/4NIqAgkGZus | 83 | pass | 26 s | review-eligible (no licence; risk low; owner decides per draft) | 25k | iLumesh Shorts | The moment the man finally releases the treats and the dogs eagerly rush to grab them. |
+| 20 | Chico Peed On A Living Statue… Her Response Was Legendary 😳🐶🏆 | youtube | 14,279,407 | https://www.youtube.com/shorts/IPIqvdWZh10 | 84.5 | pass | 15 s | review-eligible (no licence; risk low; owner decides per draft) | 12k | Nowhere Else | The statue's unexpected reaction to being peed on is hilarious. |
+| 21 | #FunnyDogs #DogFails #InstaKarma #DogAttacks #Humor #ViralShorts #Tren | youtube | 19,399,440 | https://www.youtube.com/shorts/eTLWsPoP8PI | 84.5 | pass | 15 s | review-eligible (no licence; risk low; owner decides per draft) | 11k | Zero_to_celebrity | The moment the dog unexpectedly turns the tables and chases the person, causing them to flee in fear. |
+| 22 | Comment “GLOW” for the link!👇 #dogmom # #doglove #cutedog #goldenretr | youtube | 9,852,912 | https://www.youtube.com/shorts/rVnYoCHJaL8 | 84.5 | pass | 13 s | review-eligible (no licence; risk low; owner decides per draft) | 10k | Nomi Nest | The dog joyfully exclaims it can now play 'PAST DARK' with its new glowing collar. |
+| 23 | He gave my Samoyed a haircut in 5 seconds    💀#dogmemes #couplescomed | youtube | 14,545,500 | https://www.youtube.com/shorts/mDaHLrXWfAs | 81.5 | pass | 15 s | review-eligible (no licence; risk low; owner decides per draft) | 21k | wxt001 | The dramatic reveal of the dog's bald patch with a comedic caption. |
+| 24 | 🐶🤸‍♂️ Dog Performs an Amazing Flip!Dogs truly are our best friends ❤ | youtube | 9,717,414 | https://www.youtube.com/shorts/B0H2voguyr4 | 81.5 | pass | 27 s | review-eligible (no licence; risk low; owner decides per draft) | 16k | FLIPPER0 | The dog executes a perfect flip, surprising everyone around. |
+| 25 | Go, go#shortsfeed #goldenretriever | youtube | 21,747,094 | https://www.youtube.com/shorts/1ACN91cPwhs | 75.5 | pass | 10 s | review-eligible (no licence; risk low; owner decides per draft) | 66k | LUNA & BUCK GOLDENS | The dog's over-the-top excitement as it tries to greet the person outside the car. |
+| 26 | Nothing Seems To Matter 😂#shorts #funnyanimals #reaction #animalvideo | youtube | 24,907,176 | https://www.youtube.com/shorts/bpDq-VlRDlQ | 75.5 | pass | 29 s | review-eligible (no licence; risk low; owner decides per draft) | 36k | COMEDY EMAM English  | The dog's calm reaction to the unexpected presence of the toy tiger. |
+| 27 | Cake Flip Challenge 🍰 | youtube | 18,789,900 | https://www.youtube.com/shorts/uy9bnfk4uw0 | 74.5 | pass | 18 s | review-eligible (no licence; risk medium; owner decides per draft) | 52k | BUNNY GADGETS | The dog unexpectedly flips the cake, causing a hilarious mess. |
+| 28 | POV: Accidentally ruined her dog's hair with bubblegum... Hat cover-up | youtube | 104,877,685 | https://www.youtube.com/shorts/braCKjqV59U | 74.5 | pass | 15 s | review-eligible (no licence; risk low; owner decides per draft) | 51k | gsnsj | The exaggerated facial expressions of the person as they realize the hair disaster. |
+| 29 | Construyeron la piscina más grande del mundo! | youtube | 14,380,717 | https://www.youtube.com/shorts/_ZaZWN5pgcY | 74.5 | pass | 22 s | review-eligible (no licence; risk low; owner decides per draft) | 30k | Gravity | A dog unexpectedly slides down the pool's slope, creating a funny splash. |
+| 30 | Worst cover up in human history! 😭💥#shorts #funny #dogmemes #cake #p | youtube | 10,880,315 | https://www.youtube.com/shorts/pyj7zzvUEj4 | 74.5 | pass | 15 s | review-eligible (no licence; risk low; owner decides per draft) | 20k | Nadia Saed | The dog's unimpressed expression contrasts with the person's excitement. |
+
+### Rejected (80) by reason
+- not_dog_comedy: 39
+- duplicate: 27
+- rights_blocked: 23
+- comedy: 7
+- no_clear_payoff: 4
+- compilation_or_multi_clip: 3
+- ai_generated_suspected: 1
+
+YouTube funnel: 864 shelf rows -> 630 unique -> 376 at/near 1M -> 160 metadata -> 159 verified >= 1M (dropped {"too_long_for_short":1})
+
+Rights note: view counts measure popularity, not permission. Standard-licence YouTube / TikTok / Reddit clips are transformation-review only (owner decides per draft, creator credited); nothing here is cleared unless a CC BY licence with low provenance risk was found.

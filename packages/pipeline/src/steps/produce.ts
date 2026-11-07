@@ -1,19 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { broadcastRisk, creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
+import { assessFairUse, broadcastRisk, creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
 import { analyzeClip } from './analyze.js';
 import { contactSheet, readWatermark, sheetBase64, sheetPathFor } from './frames.js';
 import { log, type Config } from '../config.js';
 import type { Store } from '../store.js';
-import { transcribe } from './captions.js';
+import { transcribe, transcribeDetailed } from './captions.js';
 import { writeCopy } from './copy.js';
 import { downloadMedia, extractAudio, ffprobe, mediaDuration, videoPhash } from './media.js';
 import { loadTemplate, pickMusic, renderShort } from './render.js';
+import { qualityControl } from './qc.js';
 import { scoreCandidate } from './score.js';
+import { planSfx } from './sfx.js';
 import { synthesiseCommentary } from './tts.js';
 import { uploadPublic } from './upload.js';
 import { withRetry } from '../retry.js';
-import { recordRender, recordUpload } from '../usage.js';
+import { costOf, currentUsage, recordRender, recordUpload } from '../usage.js';
 import { assertBudget, isFatal, TIMEOUTS, withTimeout } from '../guard.js';
 
 /**
@@ -42,6 +44,7 @@ export async function produceCandidate(cfg: Config, store: Store, cIn: Candidate
 
 async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, opts: { allowOkTier?: boolean } = {}): Promise<Production | null> {
   let c = cIn;
+  const costAtStart = costOf(currentUsage()).total_usd;
   const dir = path.join(cfg.workDir, 'jobs', c.id);
   fs.mkdirSync(dir, { recursive: true });
   const now = () => new Date().toISOString();
@@ -88,20 +91,22 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
 
     // transcript (for captions + better copy); fine if absent
     const audio = await extractAudio(src, path.join(dir, 'audio.mp3'));
-    const transcript = audio ? await transcribe(cfg, audio) : null;
+    const speech = audio ? await transcribeDetailed(cfg, audio) : null;
+    const transcript = speech?.transcript ?? null;
+    const speechInfo = speech && speech.wordCount > 0 ? { language: speech.language, words: speech.wordCount, excerpt: speech.text.slice(0, 300) } : null;
 
     // vision pass: contact sheet -> re-score with frames (detects watermarks / real creator, grounds the copy in what happens)
     const sheet = await contactSheet(src, sheetPathFor(dir)).catch(() => null);
     const frames = sheet ? sheetBase64(sheet) : undefined;
     if (frames) {
-      const rescored = await scoreCandidate(cfg, { ...c, status: 'discovered' }, await store.weights(), transcript?.text, frames);
-      if (rescored.status === 'rejected_safety' || rescored.status === 'blocked_rights' || rescored.status === 'rejected_score') {
-        await store.patchCandidate(c.id, { status: rescored.status, status_reason: `vision pass: ${rescored.status_reason}`, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null });
+      const rescored = await scoreCandidate(cfg, { ...c, status: 'discovered' }, await store.weights(), transcript?.text, frames, speechInfo);
+      if (rescored.status === 'rejected_safety' || rescored.status === 'blocked_rights' || rescored.status === 'rejected_score' || rescored.status === 'rejected_language') {
+        await store.patchCandidate(c.id, { meta_json: rescored.meta_json ?? null, status: rescored.status, status_reason: `vision pass: ${rescored.status_reason}`, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null });
         log.info(`vision pass stopped ${c.id}: ${rescored.status} (${rescored.status_reason})`);
         return null;
       }
-      c = { ...c, llm_score: rescored.llm_score, final_score: rescored.final_score, llm_rationale: rescored.llm_rationale, safety_flags: rescored.safety_flags, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null };
-      await store.patchCandidate(c.id, { llm_score: c.llm_score, final_score: c.final_score, llm_rationale: c.llm_rationale, safety_flags: c.safety_flags, copyright_risk: c.copyright_risk, copyright_risk_reasons: c.copyright_risk_reasons, detected_handle: c.detected_handle, detected_platform: c.detected_platform, visual_summary: c.visual_summary });
+      c = { ...c, meta_json: rescored.meta_json ?? c.meta_json ?? null, llm_score: rescored.llm_score, final_score: rescored.final_score, llm_rationale: rescored.llm_rationale, safety_flags: rescored.safety_flags, copyright_risk: rescored.copyright_risk, copyright_risk_reasons: rescored.copyright_risk_reasons, detected_handle: rescored.detected_handle ?? null, detected_platform: rescored.detected_platform ?? null, visual_summary: rescored.visual_summary ?? null };
+      await store.patchCandidate(c.id, { meta_json: c.meta_json ?? null, llm_score: c.llm_score, final_score: c.final_score, llm_rationale: c.llm_rationale, safety_flags: c.safety_flags, copyright_risk: c.copyright_risk, copyright_risk_reasons: c.copyright_risk_reasons, detected_handle: c.detected_handle, detected_platform: c.detected_platform, visual_summary: c.visual_summary });
       // hard backstop: broadcast / pro-sports / TV footage seen by the vision pass or heard in the transcript is never produced
       const b = broadcastRisk(`${c.title}\n${c.description ?? ''}\n${c.visual_summary ?? ''}\n${transcript?.text.slice(0, 400) ?? ''}`);
       if (b.high && c.rights_status !== 'cleared') {
@@ -119,7 +124,7 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
 
     // copy + edit direction
     const copy = await writeCopy(cfg, c, transcript?.text, frames);
-    const commentaryMode: CommentaryMode = cfg.commentaryDefault === 'never' ? 'none' : cfg.commentaryDefault === 'always' ? 'outro_voice' : (copy.commentary_mode ?? 'outro_voice');
+    const commentaryMode: CommentaryMode = cfg.commentaryDefault === 'never' ? 'none' : cfg.commentaryDefault === 'always' ? 'outro_voice' : cfg.commentaryDefault === 'text_only' ? 'text_only' : (copy.commentary_mode ?? 'outro_voice');
     const vo = commentaryMode === 'outro_voice' ? await synthesiseCommentary(cfg, copy.commentary, path.join(dir, 'vo.mp3')) : null;
 
     // clip-specific edit plan: detected peak moment -> freeze / punch-in / replay / sticker
@@ -144,28 +149,60 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     // render
     const outPath = path.join(dir, `${c.id}.final.mp4`);
     const renderStart = Date.now();
+    // comedic sound effects on the edit beats (freeze -> record scratch, punch-in -> boing/thud, replay -> whoosh); only
+    // when the real library exists (SFX_PROVIDER=elevenlabs built it) or placeholders were explicitly chosen (synth)
+    const sfx = planSfx(cfg, timeline.beats, timeline.map, { category: c.category });
     const r = await withRetry(`render ${c.id}`, () => renderShort(cfg, template, {
       clipPath: src, headline: copy.headline, commentary: copy.commentary, commentaryMode, voPath: vo, words: transcript?.words ?? null,
-      musicPath: cfg.musicDefault === 'never' ? null : (copy.music === 'none' && cfg.musicDefault !== 'always') ? null : pickMusic(cfg, c.category), outPath, workDir: dir, timeline,
+      musicPath: cfg.musicDefault === 'never' ? null : (copy.music === 'none' && cfg.musicDefault !== 'always') ? null : pickMusic(cfg, c.category), outPath, workDir: dir, timeline, sfx,
     }), { attempts: 2, baseMs: 1000 });
     recordRender((Date.now() - renderStart) / 1000);
     recordUpload(fs.statSync(outPath).size + (fs.existsSync(r.thumbnailPath) ? fs.statSync(r.thumbnailPath).size : 0));
+
+    // independent quality control of the finished file (technical + editorial); a blocking failure rejects the video so
+    // produceUntil renders a replacement. QC_ENFORCE=false records the verdict without rejecting (calibration runs).
+    const attribution = creditText(c, { contactEmail: cfg.contactEmail });
+    const captionWords = transcript?.words.length ? transcript.words.map((w) => ({ word: w.word, start: timeline.map(w.start), end: timeline.map(w.end) })).filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end) && w.end >= 0) : null;
+    const siblings = (await store.listProductions({ candidate_id: c.id })).length;
+    const qc = await qualityControl(cfg, {
+      file: outPath, candidate: c, headline: copy.headline, caption: copy.caption, hashtags: copy.hashtags, commentaryMode, commentary: copy.commentary,
+      edits: { freeze: !!timeline.beats.freeze, punchIn: !!timeline.beats.punchIn, replay: !!timeline.beats.replay, captions: (transcript?.words.length ?? 0) >= 6 },
+      publicText: [copy.caption, attribution, copy.hashtags.map((t) => `#${t}`).join(' ')].join('\n\n'), words: captionWords, siblingProductions: siblings,
+      transcribe: process.env.QC_RETRANSCRIBE === 'false' ? undefined : async (file) => { const a = await extractAudio(file, path.join(dir, 'qc_audio.mp3')); return a ? transcribeDetailed(cfg, a) : null; },
+      sourceSpeech: speechInfo,
+    });
+    if (!qc.ok && process.env.QC_ENFORCE !== 'false') {
+      const why = qc.checks.filter((x) => !x.ok && x.severity === 'block').map((x) => `${x.name}: ${x.detail}`).join('; ').slice(0, 280);
+      await store.patchCandidate(c.id, { status: 'rejected_qc', status_reason: `QC: ${why}` });
+      log.info(`rejected ${c.id} by QC: ${why}`);
+      return null;
+    }
 
     // upload
     const key = `renders/${c.id}/${path.basename(outPath)}`;
     const up = await withRetry(`upload ${c.id}`, () => uploadPublic(cfg, outPath, key, 'video/mp4'), { attempts: 3, baseMs: 2000 });
     const thumb = await withRetry(`upload thumb ${c.id}`, () => uploadPublic(cfg, r.thumbnailPath, key.replace(/\.mp4$/, '.jpg'), 'image/jpeg'), { attempts: 3, baseMs: 2000 });
 
-    const attribution = creditText(c, { contactEmail: cfg.contactEmail });
+    // case-specific fair-use assessment (owner policy): facts + explicit verdict and uncertainty; never a licence
+    const fairUse = basis === 'cleared' ? null : assessFairUse({
+      candidate: c, commentary: copy.commentary, commentaryMode, headline: copy.headline,
+      edits: { freeze: !!timeline.beats.freeze, punchIn: !!timeline.beats.punchIn, replay: !!timeline.beats.replay, captions: (transcript?.words.length ?? 0) >= 6, muteSource },
+      editedSeconds: r.editedClipSec, transcriptChars: transcript?.text.length ?? 0, maxRisk: cfg.fairUseMaxRisk,
+    });
+    if (fairUse) log.info(`fair-use assessment ${c.id}: ${fairUse.verdict} (${fairUse.factors.filter((f) => f.state !== 'for').map((f) => `${f.name}:${f.state}`).join(', ') || 'all factors for'})`);
     const prod: Production = {
       id: ulid(), candidate_id: c.id, headline: copy.headline, commentary: copy.commentary,
       caption_text: copy.caption,
       hashtags: JSON.stringify(copy.hashtags), voice_id: vo ? cfg.elevenVoiceId ?? 'auto' : null,
       music_track: null, r2_key: up.uploaded ? key : null, public_url: up.uploaded ? up.url : null,
       thumbnail_url: thumb.uploaded ? thumb.url : null, duration_sec: r.durationSec,
-      render_log: JSON.stringify({ transcriptWords: transcript?.words.length ?? 0, vo: !!vo, commentaryMode, peak: analysis.peak, dropped: timeline.dropped, cmd: r.command.slice(0, 12) }),
+      render_log: JSON.stringify({ transcriptWords: transcript?.words.length ?? 0, vo: !!vo, commentaryMode, peak: analysis.peak, dropped: timeline.dropped, sfx: sfx.map((s) => `${path.basename(s.path)}@${s.at.toFixed(2)}`), cmd: r.command.slice(0, 12) }),
       reuse_basis: basis,
       edit_plan: JSON.stringify(timeline.beats),
+      content_format: c.content_format ?? 'general_viral',
+      production_cost_usd: Math.round((costOf(currentUsage()).total_usd - costAtStart) * 10000) / 10000,
+      qc_score: qc.score, qc_json: JSON.stringify({ ok: qc.ok, score: qc.score, checks: qc.checks, editorial: qc.editorial }),
+      fair_use_json: fairUse ? JSON.stringify(fairUse) : null,
       created_at: now(), updated_at: now(),
     };
     await store.upsertProduction(prod);
@@ -225,16 +262,17 @@ export async function produceUntil(cfg: Config, store: Store, target: number): P
   // 1080p-class sources first (known from discovery metadata or a previous probe); 720p-class only if still short.
   const tierOf = (c: Candidate) => c.quality_tier ?? qualityTier(c.width, c.height);
   const hdOrUnknown = ready.filter((c) => tierOf(c) !== 'ok' && tierOf(c) !== 'low');
-  const okOnly = ready.filter((c) => tierOf(c) === 'ok');
-  log.info(`need ${target - have} more productions; ${hdOrUnknown.length} 1080p-class/unprobed + ${okOnly.length} 720p-class candidates available`);
+  log.info(`need ${target - have} more productions; ${hdOrUnknown.length} 1080p-class/unprobed + ${ready.length - hdOrUnknown.length} 720p-class candidates available`);
   for (const c of hdOrUnknown) {
     if (have >= target) break;
     const p = await produceCandidate(cfg, store, c, { allowOkTier: false });
     if (p) have++;
   }
-  if (have < target && okOnly.length) {
-    log.warn(`1080p-class stock exhausted; falling back to ${okOnly.length} 720p-class candidate(s)`);
+  if (have < target) {
+    // re-read: the first pass probes unknown sources and HOLDS the 720p-class ones, so the fallback list must be rebuilt
+    // here (computing it before the pass left every Reddit-RSS candidate, which carries no resolution, unused)
     const held = (await store.listCandidates({ status: ['scored', 'ready'] })).filter((c) => tierOf(c) === 'ok' && productionBasis(c, policy) !== null);
+    if (held.length) log.warn(`1080p-class stock exhausted; falling back to ${held.length} 720p-class candidate(s)`);
     for (const c of held) {
       if (have >= target) break;
       const p = await produceCandidate(cfg, store, c, { allowOkTier: true });

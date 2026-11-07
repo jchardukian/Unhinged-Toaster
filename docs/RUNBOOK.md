@@ -86,6 +86,50 @@ two consecutive 400/401/403 answers from a service stop the run immediately (cir
 same error for every candidate. Spend is metered (`API_BUDGET_USD`, production default $15 weekly / $8 daily; set the
 repository variable to change it) and reported at the end of every run together with elapsed time.
 
+## Dog-content pilot (opt-in, manual, never publishes)
+
+Paid AI generation is paused (owner decision): `ai_count` and `ai_video_budget` default to 0 and a paid provider refuses
+to start at $0. GitHub → Actions → "Dog pilot (opt-in, never publishes)" → Run workflow with `ranking_count=3`: three
+real-dog ranking compilations from licensed footage (Wikimedia Commons CC0/PD/CC BY and Internet Archive need no key;
+Pexels / Pixabay are added when their free keys exist). The run writes `dog-pilot-report.md`
+(per video: format, attempts, rejections, cost per accepted video, quality scores, rights) plus a contact sheet and the
+finished mp4s as artifacts. It creates no Buffer posts; the general daily/weekly schedules are untouched.
+Rankings use licensed stock only; when fewer than 3 funny licensed clips exist the shortage is reported, not filled.
+Sound effects: set repository variable `SFX_PROVIDER=elevenlabs` to build the real library once (10 effects, ~2,000
+ElevenLabs credits, inside the free tier); otherwise free placeholders are used and clearly labelled.
+
+### Viral funny-dog shortlist (discovery only)
+
+GitHub → Actions → "Dog shortlist (discovery only, never publishes)" → Run workflow (or `npm run toaster -- dog-shortlist
+--top 30 --limit 60`). It scans the YouTube dog hashtag Shorts shelves, verifies every view count through the
+embedded-player metadata (≥ 1,000,000 required), looks at three real frames per clip, scores comedy (clear payoff, single
+clip, quality, safety), scans TikTok creator pages when handles exist (`TIKTOK_ACCOUNTS` variable, the `tiktok_handles`
+input, or handles read from watermarks), lists Reddit dog communities (no view counts there), and writes a ranked
+shortlist (title, platform, verified views, URL, comedy score, duration, rights status) to `dog-shortlist.md` /
+`dog-shortlist.json` in the run artifact. Cost ≈ $0.003 per scored clip (default budget $2). It stores nothing, creates no
+Buffer posts and does not touch the daily/weekly schedules; rights stay exactly as the general policy says (standard
+licence = transformation review, owner decides per draft).
+
+## Unattended operation
+
+See **docs/AUTONOMY.md**: five gates (documented rights, automated QC, minimum QC score, duplicate prevention,
+authorization + health), the two repository variables that switch it on, the "Emergency stop" workflow, the monitor that
+pauses it automatically, the decision log, and the finite calibration (`toaster calibration`) that has to pass first.
+Until the owner sets `UNATTENDED_PUBLISHING=true` and the authorization phrase, everything below (drafts) applies.
+
+## Approval gate (what Buffer actually enforces)
+
+Every post is created with `saveToDraft: true` and its intended `dueAt` (the planned slot). A Buffer **draft** is not
+in the publishing queue: when its scheduled time arrives nothing happens. It publishes only after a person opens it in
+Buffer and chooses "Add to queue" / "Schedule" (allowed actions on a draft: addPostToQueue, publishPostNow,
+updatePostSchedule, deletePost, ...). The client refuses any create that is neither a draft nor `needsApproval`
+(`publish guard`). `BUFFER_APPROVAL_MODE=needs_approval` would use Buffer's approval queue instead, but that feature
+needs a Team plan with members; this organisation has 0 members, so drafts are the gate. There is no separate
+"permission pending" queue: a transformation-review video is drafted like any other, with the internal review note
+(source, creator, URL, copyright-risk) that the owner reads before approving and that is stripped from the public
+caption on approval. Creator permissions are the owner's decision at that moment; nothing in the automation sends
+outreach (`rights:outreach` is a manual CLI command only).
+
 ## Weekly operation
 - Sunday morning: read the readiness report (weekly run summary or `GET <worker>/weeks/next/report?format=md`): it lists which drafts are transformation-review (source, creator, copyright risk) and which have an explicit basis. Then open Buffer → Drafts (review drafts carry the REVIEW tag when configured). Approve ("Add to queue" or "Schedule") or delete. Captions are already public-ready: creator credit, source link, edit summary, contact e-mail.
 - Nothing else. A deletion is confirmed after two polls ≥ 10 min apart, then a replacement is rendered and drafted into the same slot (Worker: ~30–60 min; Actions fallback: ~2–4 h). Replacements are new drafts, so they appear in the Drafts tab for your next look.

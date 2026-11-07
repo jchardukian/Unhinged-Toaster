@@ -101,7 +101,8 @@ test('parseJson tolerates code fences and prose', () => {
 
 test('isHallucination drops Whisper artefacts and keeps real speech', () => {
   const w = (n: number) => Array.from({ length: n }, (_, i) => ({ word: 'x', start: i * 0.4, end: i * 0.4 + 0.3 }));
-  assert.equal(isHallucination('ぽんぽこ ぽんぽこ ぽんぽこ ぽんぽこ', w(4)), 'non_latin_script');
+  assert.equal(isHallucination('ぽんぽこ ぽんぽこ ぽんぽこ ぽんぽこ', w(4)), 'repetitive');
+  assert.equal(isHallucination('これは本当に面白い犬の動画です', w(4)), 'non_latin_script', 'real non-Latin speech still reaches the language gate');
   assert.equal(isHallucination('Thanks for watching!', w(3)), 'stock_phrase');
   assert.equal(isHallucination('More videos available from our channel.', w(6)), 'stock_phrase');
   assert.equal(isHallucination('no no no no no no no no', w(8)), 'repetitive');
@@ -226,4 +227,11 @@ test('worker URL falls back to config/worker-url.txt written by the deploy workf
   assert.equal(deployedWorkerUrl(root), 'https://toaster-api.someone.workers.dev');
   fs.writeFileSync(path.join(root, 'config', 'worker-url.txt'), 'javascript:alert(1)');
   assert.equal(deployedWorkerUrl(root), undefined);
+});
+
+test('Whisper hallucinations in other languages are not treated as foreign dialogue', () => {
+  const w = (n: number) => Array.from({ length: n }, (_, i) => ({ word: 'x', start: i, end: i + 0.5 }));
+  assert.equal(isHallucination('Subtítulos por la comunidad de Amara.org', w(6)), 'stock_phrase');
+  assert.equal(isHallucination('清單 抖音 抖音', w(3)), 'stock_phrase');
+  assert.equal(isHallucination('Untertitel im Auftrag des ZDF', w(5)), 'stock_phrase');
 });

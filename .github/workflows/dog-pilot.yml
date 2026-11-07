@@ -1,0 +1,92 @@
+name: Dog pilot (opt-in, never publishes)
+
+# Separate, manual workflow for the dog-content pilot. It does NOT touch the daily/weekly schedules and creates no
+# Buffer posts. Paid AI generation is PAUSED: ai_count defaults to 0 and ai_video_budget to 0 (a paid provider refuses
+# to start at $0). The pilot is real-dog rankings from licensed footage: Wikimedia Commons + Internet Archive need no
+# key; Pexels / Pixabay need free keys.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'AI video provider (needs GEMINI_API_KEY or RUNWAY_API_KEY secret; mock is free)'
+        type: choice
+        options: [mock, gemini, runway]
+        default: mock
+      model:
+        description: 'Model id override (gemini-omni-1.2-flash | kling_4_flash | gen4.5 | veo3.1_fast); blank = provider default'
+        default: ''
+      ai_count:
+        description: 'Realistic AI dog comedy Shorts to accept'
+        default: '0'
+      ranking_count:
+        description: 'Real-dog rankings from LICENSED footage (Commons + Internet Archive; plus Pexels/Pixabay when their free keys exist)'
+        default: '3'
+      controls:
+        description: 'General viral control Shorts from the existing engine'
+        default: '0'
+      ai_video_budget:
+        description: 'HARD cap in USD for AI generation this run (0 = paused, the default)'
+        default: '0'
+      stock:
+        description: 'live = Wikimedia Commons + Internet Archive (no key) plus Pexels/Pixabay when their free keys exist; mock = synthetic clips'
+        type: choice
+        options: [live, mock]
+        default: live
+
+concurrency:
+  group: toaster-dog-pilot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dog-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg python3-pil && pip install -q "yt-dlp[default]"
+        timeout-minutes: 5
+      - run: npm ci && npm run build && npm run brand:generate
+        timeout-minutes: 5
+      - name: dog-pilot
+        timeout-minutes: 75
+        env:
+          AI_VIDEO_BUDGET_USD: ${{ inputs.ai_video_budget }}
+          API_BUDGET_USD: ${{ vars.API_BUDGET_USD || '2' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          SFX_PROVIDER: ${{ vars.SFX_PROVIDER }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          VISION_OCR_MODEL: ${{ vars.VISION_OCR_MODEL || 'gpt-4o' }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ vars.ELEVENLABS_VOICE_ID }}
+          TOASTER_API_URL: ${{ vars.TOASTER_API_URL }}
+          TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+          COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT || 'text_only' }}
+          MUSIC_DEFAULT: ${{ vars.MUSIC_DEFAULT }}
+          WORK_DIR: ./work
+        run: node packages/pipeline/dist/cli.js dog-pilot --provider "${{ inputs.provider }}" ${{ inputs.model && format('--model {0}', inputs.model) || '' }} --ai "${{ inputs.ai_count }}" --rankings "${{ inputs.ranking_count }}" --controls "${{ inputs.controls }}" --stock "${{ inputs.stock }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dog-pilot
+          path: |
+            work/jobs/*/*.final.mp4
+            work/jobs/*/*.final.jpg
+            work/dog-pilot-report.md
+            work/dog-pilot-rows.json
+            work/dog-pilot-sheet.jpg
+            work/usage.jsonl
+          if-no-files-found: ignore
+          retention-days: 14

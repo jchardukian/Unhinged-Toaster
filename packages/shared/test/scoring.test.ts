@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { heuristicScore, llmScore, finalScore, updateCategoryWeights, defaultCategoryWeights, MIN_FINAL_SCORE } from '../src/scoring.js';
+import { heuristicScore, llmScore, finalScore, reachScore, updateCategoryWeights, defaultCategoryWeights, MIN_FINAL_SCORE } from '../src/scoring.js';
 
 const now = '2026-11-02T12:00:00Z';
 
@@ -10,6 +10,18 @@ test('heuristicScore rewards fast-moving, well-shaped clips', () => {
   assert.ok(viral > 75, `viral=${viral}`);
   assert.ok(dud < 30, `dud=${dud}`);
   assert.ok(viral > dud);
+});
+
+test('heuristicScore prioritises verified reach: 1M+ views outrank 100k at equal engagement; Reddit (no views) is unchanged', () => {
+  const base = { likes: 20_000, comments: 300, shares: 200, published_at: '2026-11-01T00:00:00Z', discovered_at: now, duration_sec: 14, width: 1080, height: 1920 };
+  const million = heuristicScore({ ...base, views: 1_500_000 });
+  const hundredK = heuristicScore({ ...base, views: 100_000 });
+  const tenK = heuristicScore({ ...base, views: 10_000 });
+  assert.ok(million > hundredK && hundredK > tenK, `${million} > ${hundredK} > ${tenK}`);
+  assert.equal(reachScore(10_000), 0); assert.equal(reachScore(100_000), 50); assert.equal(reachScore(1_000_000), 100); assert.equal(reachScore(50_000_000), 100);
+  const reddit = heuristicScore({ ...base, views: null });
+  assert.equal(reddit, heuristicScore({ ...base, views: null }), 'deterministic');
+  assert.ok(reddit > 0);
 });
 
 test('heuristicScore tolerates missing fields', () => {

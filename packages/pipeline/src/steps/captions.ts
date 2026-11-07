@@ -7,8 +7,22 @@ import { mediaDuration } from './media.js';
 export interface Word { word: string; start: number; end: number }
 export interface Transcript { text: string; words: Word[] }
 
+/**
+ * What was heard in the audio, kept even when the words are not usable as captions: Whisper's detected language and the
+ * raw text. A non-English transcript used to be dropped as a "hallucination", which made foreign-language dialogue look
+ * like silence to the language gate.
+ */
+export interface SpeechInfo { transcript: Transcript | null; language: string | null; text: string; wordCount: number; discarded: string | null }
+
+/** Pure: is this detected speech English? Unknown / empty counts as no speech. */
+export function isEnglishSpeech(s: Pick<SpeechInfo, 'language'> | null): boolean { return !s?.language || /^(en|english)$/i.test(s.language); }
+
 /** Whisper (OpenAI) word-level transcription. Returns null when there is no usable speech. */
 export async function transcribe(cfg: Config, audioFile: string): Promise<Transcript | null> {
+  return (await transcribeDetailed(cfg, audioFile))?.transcript ?? null;
+}
+
+export async function transcribeDetailed(cfg: Config, audioFile: string): Promise<SpeechInfo | null> {
   const form = new FormData();
   form.append('file', new Blob([fs.readFileSync(audioFile)]), 'audio.mp3');
   form.append('model', cfg.transcribeModel);
@@ -29,12 +43,18 @@ export async function transcribe(cfg: Config, audioFile: string): Promise<Transc
   }
   recordSuccess('openai');
   recordWhisper((await mediaDuration(audioFile)) ?? 0);
-  const j = (await res.json()) as { text: string; words?: Word[] };
+  const j = (await res.json()) as { text: string; words?: Word[]; language?: string };
   const words = (j.words ?? []).filter((w) => w.word.trim());
-  if (words.length === 0 || j.text.trim().length < 2) return null;
+  const base = { language: j.language ?? null, text: (j.text ?? '').trim(), wordCount: words.length };
+  if (words.length === 0 || base.text.length < 2) return { ...base, transcript: null, discarded: 'no_speech' };
+  // captions are English-only: any non-English speech is reported to the language gate, never captioned
+  // known Whisper hallucinations (subtitle credits, "thanks for watching", repetitions) are not speech in ANY language;
+  // only the script check is skipped for non-English, because real foreign speech is what the language gate needs
   const h = isHallucination(j.text, words);
-  if (h) { log.info(`transcript discarded as Whisper hallucination (${h}): "${j.text.trim().slice(0, 60)}"`); return null; }
-  return { text: j.text.trim(), words };
+  if (h && h !== 'non_latin_script') { log.info(`transcript discarded as Whisper hallucination (${h}): "${base.text.slice(0, 60)}"`); return { ...base, language: null, wordCount: 0, transcript: null, discarded: h }; }
+  if (!isEnglishSpeech(base)) { log.info(`speech in ${base.language}: "${base.text.slice(0, 60)}" (not captioned; language gate decides)`); return { ...base, transcript: null, discarded: 'non_english' }; }
+  if (h) { log.info(`transcript discarded as Whisper hallucination (${h}): "${base.text.slice(0, 60)}"`); return { ...base, transcript: null, discarded: h }; }
+  return { ...base, transcript: { text: base.text, words }, discarded: null };
 }
 
 /** PG channel: swear words are masked in captions (f**k) and muted in the source audio for the word's duration. */
@@ -60,12 +80,12 @@ export function isHallucination(text: string, words: Word[]): string | null {
   const t = text.trim();
   const letters = t.replace(/[^\p{L}]/gu, '');
   if (letters.length === 0) return 'no_letters';
-  const latin = letters.replace(/[^A-Za-z\u00C0-\u024F]/g, '').length;
-  if (latin / letters.length < 0.6) return 'non_latin_script';
   const toks = t.toLowerCase().split(/\s+/).filter(Boolean);
   if (toks.length >= 4 && new Set(toks).size / toks.length < 0.35) return 'repetitive';
   if (/^(thanks? (you )?for watching|thank you|subscribe|like and subscribe|see you (in the )?next|bye[.!]*)[.!\s]*$/i.test(t)) return 'stock_phrase';
-  if (/(more videos|our channel|subscribe to|subtitles? by|amara\.org|www\.|\.com\b|copyright|all rights reserved)/i.test(t) && toks.length <= 12) return 'stock_phrase';
+  if (/(more videos|our channel|subscribe to|subtitles? by|subt[ií]tulos|untertitel|sous-titres|amara\.org|www\.|\.com\b|\.org\b|copyright|all rights reserved|抖音|字幕)/i.test(t) && toks.length <= 12) return 'stock_phrase';
+  const latin = letters.replace(/[^A-Za-z\u00C0-\u024F]/g, '').length;
+  if (latin / letters.length < 0.6) return 'non_latin_script';
   const span = words[words.length - 1].end - words[0].start;
   const spoken = words.reduce((a, w) => a + Math.max(0, w.end - w.start), 0);
   if (toks.length >= 6 && span > 3 && spoken / span < 0.08) return 'implausible_timing';

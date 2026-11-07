@@ -1,9 +1,11 @@
+import { americanize, UK_SLANG } from '@toaster/shared';
 import { clampSentence, containsSlur, normaliseHashtags, type Candidate, type CopyResult } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { chatJson } from '../llm.js';
 
 const SYSTEM = `You write on-screen copy for "The Unhinged Toaster", a comedy Shorts channel with an angry toaster mascot.
 Voice: loud, deadpan-furious, comic-book energy, wholesome underneath. PG. No slurs, no punching down, no mocking private people's bodies or disabilities.
+Audience: English-speaking viewers in the United States. Write every field in natural, casual American English the way a funny American creator talks online: American spelling (color, favorite, mom), American terms, no British slang (no "mate", "bloody", "cheeky", "bloke", "innit"), no translated-sounding or stiff AI phrasing (avoid "Watch as…", "Spoiler:", "epic", "hilarious" filler). Never quote or translate non-English dialogue; describe what happens visually. Hashtags in English.
 Output JSON:
 {
  "headline": string,     // 3-8 words, ALL CAPS energy not required, max 60 characters, no hashtags, no emojis, no quotes
@@ -25,7 +27,7 @@ export async function writeCopy(cfg: Config, c: Candidate, transcript?: string |
     const out = validate(r);
     if (out) return out;
     log.warn(`copy failed validation for ${c.id} (empty or slur), retrying once with the clip context`);
-    const r2 = await chatJson<CopyResult>(cfg, SYSTEM + '\nYour previous attempt was rejected (empty or offensive). Keep it clean and specific to the clip.', JSON.stringify({ original_title: c.title, visual_summary: c.visual_summary ?? null, category: c.category, transcript: transcript?.slice(0, 400) ?? null }), { temperature: 0.6, maxTokens: 350, imageJpegBase64: framesJpegBase64 });
+    const r2 = await chatJson<CopyResult>(cfg, SYSTEM + '\nYour previous attempt was rejected (empty, offensive, or not natural American English). Keep it clean, American, and specific to the clip.', JSON.stringify({ original_title: c.title, visual_summary: c.visual_summary ?? null, category: c.category, transcript: transcript?.slice(0, 400) ?? null }), { temperature: 0.6, maxTokens: 350, imageJpegBase64: framesJpegBase64 });
     const out2 = validate(r2);
     if (out2) return out2;
   } catch (e) {
@@ -51,11 +53,16 @@ export function validate(r: CopyResult): CopyResult | null {
   if (containsSlur(headline) || containsSlur(commentary) || containsSlur(r.caption ?? '')) return null;
   const sticker = cleanShort(r.sticker, 14);
   const freeze = cleanShort(r.freeze_text, 22);
+  // American English: repair British spellings everywhere; reject British slang (the caller retries once)
+  const caption = americanize(clampSentence(String(r.caption ?? ''), 180));
+  headline = americanize(headline); commentary = americanize(commentary);
+  if (UK_SLANG.test(headline) || UK_SLANG.test(commentary) || UK_SLANG.test(caption)) return null;
+  const tags = (Array.isArray(r.hashtags) ? r.hashtags : ['funny', 'shorts', 'fails']).map((t) => americanize(String(t))).filter((t) => /^[#A-Za-z0-9_]+$/.test(t.replace(/\s/g, '')));
   return {
     headline,
     commentary,
-    caption: clampSentence(String(r.caption ?? ''), 180),
-    hashtags: normaliseHashtags(Array.isArray(r.hashtags) ? r.hashtags : ['funny', 'shorts', 'fails'], 7),
+    caption,
+    hashtags: normaliseHashtags(tags.length ? tags : ['funny', 'shorts', 'fails'], 7),
     sticker: sticker || undefined,
     freeze_text: freeze || undefined,
     edit_style: r.edit_style === 'light' ? 'light' : 'full',
