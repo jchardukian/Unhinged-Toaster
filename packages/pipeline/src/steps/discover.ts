@@ -278,12 +278,12 @@ export async function discoverRedditRss(cfg: Config, limit: number, windows: ('d
  * work through yt-dlp and expose per-video engagement. The owner curates `TIKTOK_ACCOUNTS` (original creators, not
  * compilation/licensing accounts); recent videos are ranked by views. Footage goes to transformation review.
  */
-export async function discoverTikTok(cfg: Config, limit: number, maxAgeDays = 14): Promise<Candidate[]> {
-  if (cfg.tiktokAccounts.length === 0) throw new Error('TIKTOK_ACCOUNTS not set (comma-separated creator handles)');
+export async function discoverTikTok(cfg: Config, limit: number, maxAgeDays = 14, handles: string[] = cfg.tiktokAccounts, minViews = 0): Promise<Candidate[]> {
+  if (handles.length === 0) throw new Error('TIKTOK_ACCOUNTS not set (comma-separated creator handles)');
   const now = new Date().toISOString();
   const out: Candidate[] = [];
   const minTs = Date.now() / 1000 - maxAgeDays * 86400;
-  for (const handle of cfg.tiktokAccounts) {
+  for (const handle of handles) {
     const rows = await ytdlpJson(`https://www.tiktok.com/@${handle}`, { flat: true, limit: Math.min(60, limit) }).catch(() => []);
     log.info(`tiktok @${handle}: ${rows.length} recent videos`);
     for (const r of rows) {
@@ -292,6 +292,7 @@ export async function discoverTikTok(cfg: Config, limit: number, maxAgeDays = 14
       const ts = Number(r.timestamp ?? 0);
       if (!id || dur < 4 || dur > 55) continue;
       if (ts && ts < minTs) continue;
+      if (minViews > 0 && (numOr(r.view_count) ?? 0) < minViews) continue;
       const title = String(r.title ?? r.description ?? '').trim() || `TikTok by @${handle}`;
       const prov = ccProvenanceRisk({ title, description: String(r.description ?? ''), channelTitle: handle, durationSec: dur });
       out.push({
@@ -726,6 +727,23 @@ export const DOG_STOCK_QUERIES: { q: string; category: ContentCategory }[] = [
   { q: 'dog running into', category: 'funny_animals' }, { q: 'dog confused', category: 'funny_animals' }, { q: 'dog costume', category: 'funny_animals' },
   { q: 'dog steals food', category: 'funny_animals' }, { q: 'dog bath', category: 'funny_animals' }, { q: 'dog snow', category: 'funny_animals' },
 ];
+
+// ---------------------------------------------------------------- Viral funny-dog discovery (YouTube hashtag Shorts shelves, Reddit dog subs, TikTok creators)
+/** YouTube hashtag Shorts shelves scanned for viral dog clips (no key, no cookies). Breed tags catch single-creator virals the generic tags miss. */
+export const YT_DOG_TAGS = [
+  'funnydogs', 'funnydog', 'dogs', 'dog', 'dogsoftiktok', 'doglover', 'dogshorts', 'dogvideos', 'dogfails', 'dogmemes', 'puppy', 'puppies',
+  'funnypets', 'funnyanimals', 'pets', 'husky', 'goldenretriever', 'corgi', 'frenchie', 'dachshund', 'chihuahua', 'germanshepherd', 'labrador', 'pitbull',
+];
+/** Reddit communities where funny dog clips surface (RSS, no credentials). `filter` = keep only dog-looking titles in mixed-animal subs. */
+export const REDDIT_DOG_SOURCES: { sub: string; category: ContentCategory; guess?: boolean; filter?: boolean }[] = [
+  { sub: 'WhatsWrongWithYourDog', category: 'funny_animals' }, { sub: 'rarepuppers', category: 'funny_animals' }, { sub: 'dogvideos', category: 'funny_animals' },
+  { sub: 'Zoomies', category: 'funny_animals', filter: true }, { sub: 'dogswithjobs', category: 'funny_animals' }, { sub: 'puppies', category: 'funny_animals' },
+  { sub: 'AnimalsBeingDerps', category: 'funny_animals', filter: true }, { sub: 'AnimalsBeingJerks', category: 'funny_animals', filter: true },
+  { sub: 'TikTokCringe', category: 'funny_animals', filter: true }, { sub: 'funnyvideos', category: 'funny_animals', filter: true },
+];
+const DOG_WORDS = /\b(dogs?|doggo|doggy|pupp(y|ies|er|ers)|pups?|canine|k9|hound|husky|huskies|corgis?|frenchie|bulldogs?|retrievers?|labs?|labrador|shepherd|beagle|dachshund|chihuahua|poodle|pitbull|pittie|terrier|dobermans?|rottweiler|mastiff|shiba|akita|samoyed|malinois|pomeranian|shih tzu|cocker|collie|great dane|cane corso|mutt|rescue pup)\b/i;
+/** Pure: does the text look like it is about a dog? Used to keep dog clips out of mixed-animal / mixed-content feeds. */
+export function isDogText(text: string): boolean { return DOG_WORDS.test(text); }
 
 // ---------------------------------------------------------------- Wikimedia Commons (no key; CC0 / public domain / CC BY videos with machine-readable license metadata)
 export const COMMONS_UA = 'UnhingedToasterBot/0.1 (https://github.com/jchardukian/Unhinged-Toaster; theunhingedtoaster@gmail.com)';

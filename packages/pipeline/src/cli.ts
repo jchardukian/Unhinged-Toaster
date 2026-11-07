@@ -11,6 +11,7 @@ import { produceCandidate, produceUntil, rescoreUnscored, scoreAll } from './ste
 import { runPreflight } from './steps/preflight.js';
 import { runPilot, runSmoke, writeSummary } from './steps/ladder.js';
 import { runDogPilot } from './steps/dogpilot.js';
+import { runDogShortlist } from './steps/dogshortlist.js';
 import { ensureSfxLibrary } from './steps/sfx.js';
 import { budget, isFatal, setBudget, spentUsd } from './guard.js';
 import { publishWeek } from './steps/publish.js';
@@ -30,6 +31,9 @@ Testing ladder (cheap first; API_BUDGET_USD caps spend, default $2)
 Dog-content pilot (opt-in, manual, never publishes). Paid AI generation is PAUSED (AI_VIDEO_BUDGET_USD defaults to 0).
   dog-pilot [--rankings 3] [--controls 0] [--ai 0] [--provider mock|gemini|runway] [--stock live|mock] [--skip-quality]
   sfx:build [--provider synth|elevenlabs]   create the comedic sound-effects library in assets/sfx
+  dog-shortlist [--top 30] [--limit 60] [--tiktok-handles a,b] [--no-reddit] [--no-tiktok]
+                            discovery only: viral dog Shorts (YouTube shelves, 1M+ verified views), TikTok creators, Reddit dog subs
+                            -> dog-comedy scoring -> ranked shortlist in work/dog-shortlist.md; stores nothing, drafts nothing
 
 Daily / weekly automation
   run-daily [--stock 10]    discover -> score -> keep >= N finished productions in stock -> fill open slots -> report
@@ -95,6 +99,12 @@ async function main() {
       return;
     }
     case 'sfx:build': { const r = await ensureSfxLibrary(cfg, flags.provider === 'elevenlabs' ? 'elevenlabs' : 'synth'); log.info(`sfx library: ${r.present} effects (${r.created} created)`); return; }
+    case 'dog-shortlist': {
+      const handles = String(flags['tiktok-handles'] ?? '').split(',').map((h) => h.trim().replace(/^@/, '')).filter(Boolean);
+      const r = await runDogShortlist(cfg, { top: Number(flags.top ?? 30), limit: Number(flags.limit ?? 60), tiktokHandles: handles, reddit: !flags['no-reddit'], tiktok: !flags['no-tiktok'] });
+      console.log(r.markdown); writeSummary(r.markdown);
+      return;
+    }
     case 'score': { if (flags.rescore) await rescoreUnscored(store); await scoreAll(cfg, store, Number(flags.limit ?? 200)); return; }
     case 'fetch': { const r = await fetchProbe(cfg, store, Number(flags.limit ?? 30)); log.info(`fetch probe: tried ${r.tried}, ok ${r.ok}, failed/rejected ${r.failed}`); return; }
     case 'funnel': {

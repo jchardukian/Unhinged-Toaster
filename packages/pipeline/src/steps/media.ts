@@ -198,11 +198,17 @@ export function ytdlpCommonArgs(youtube: boolean, env: NodeJS.ProcessEnv = proce
   return args;
 }
 
-/** Metadata-only yt-dlp call (flat playlist for channel/user pages, or full info for a search/video). Several targets run in one process. */
-export async function ytdlpJson(target: string | string[], opts: { flat?: boolean; limit?: number; youtube?: boolean }): Promise<Record<string, unknown>[]> {
+/**
+ * Metadata-only yt-dlp call (flat playlist for channel/user pages, or full info for a search/video). Several targets run in one process.
+ * `embeddedMeta`: YouTube's embedded-player client answers from datacenter IPs where the default clients are bot-walled
+ * ("sign in to confirm you're not a bot"). It returns no media formats, but exact view / like counts, duration, upload
+ * date, channel, description and storyboards: enough to VERIFY a view count without cookies or an API key.
+ */
+export async function ytdlpJson(target: string | string[], opts: { flat?: boolean; limit?: number; youtube?: boolean; embeddedMeta?: boolean }): Promise<Record<string, unknown>[]> {
   const args = ['--no-warnings', '--skip-download', '--dump-json', '--ignore-errors'];
   if (opts.flat) args.push('--flat-playlist');
   if (opts.limit) args.push('--playlist-end', String(opts.limit));
+  if (opts.embeddedMeta) args.push('--ignore-no-formats-error', '--extractor-args', 'youtube:player_client=web_embedded');
   for (const a of ytdlpCommonArgs(opts.youtube ?? false)) args.push(a);
   args.push(...(Array.isArray(target) ? target : [target]));
   const { stdout } = await execFileP('yt-dlp', args, { maxBuffer: 64 << 20 }).catch((e: { stdout?: string }) => ({ stdout: e.stdout ?? '' }));

@@ -98,6 +98,18 @@ Rankings use licensed stock only; when fewer than 3 funny licensed clips exist t
 Sound effects: set repository variable `SFX_PROVIDER=elevenlabs` to build the real library once (10 effects, ~2,000
 ElevenLabs credits, inside the free tier); otherwise free placeholders are used and clearly labelled.
 
+### Viral funny-dog shortlist (discovery only)
+
+GitHub → Actions → "Dog shortlist (discovery only, never publishes)" → Run workflow (or `npm run toaster -- dog-shortlist
+--top 30 --limit 60`). It scans the YouTube dog hashtag Shorts shelves, verifies every view count through the
+embedded-player metadata (≥ 1,000,000 required), looks at three real frames per clip, scores comedy (clear payoff, single
+clip, quality, safety), scans TikTok creator pages when handles exist (`TIKTOK_ACCOUNTS` variable, the `tiktok_handles`
+input, or handles read from watermarks), lists Reddit dog communities (no view counts there), and writes a ranked
+shortlist (title, platform, verified views, URL, comedy score, duration, rights status) to `dog-shortlist.md` /
+`dog-shortlist.json` in the run artifact. Cost ≈ $0.003 per scored clip (default budget $2). It stores nothing, creates no
+Buffer posts and does not touch the daily/weekly schedules; rights stay exactly as the general policy says (standard
+licence = transformation review, owner decides per draft).
+
 ## Weekly operation
 - Sunday morning: read the readiness report (weekly run summary or `GET <worker>/weeks/next/report?format=md`): it lists which drafts are transformation-review (source, creator, copyright risk) and which have an explicit basis. Then open Buffer → Drafts (review drafts carry the REVIEW tag when configured). Approve ("Add to queue" or "Schedule") or delete. Captions are already public-ready: creator credit, source link, edit summary, contact e-mail.
 - Nothing else. A deletion is confirmed after two polls ≥ 10 min apart, then a replacement is rendered and drafted into the same slot (Worker: ~30–60 min; Actions fallback: ~2–4 h). Replacements are new drafts, so they appear in the Drafts tab for your next look.

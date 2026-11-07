@@ -13,6 +13,13 @@ cross-fades, cut whooshes, #1 fanfare, then the normal branded render); `steps/d
 ACCEPTED video, shortages reported not filled, report + contact sheet); `content_format` on candidates/productions/posts
 (migration 0006) with a per-format table in the readiness report.
 
+Status (2026-11-07, latest): **viral-dog discovery added** (`dog-shortlist`, discovery only). Licensed stock turned out
+generic rather than funny, so the funny-dog supply now comes from the same viral sources the general pipeline uses:
+YouTube hashtag Shorts shelves with view counts verified (≥ 1M) through the embedded-player metadata and three CDN frames
+per clip for vision scoring, TikTok creator pages (exact views; handles from config, input, or watermarks), Reddit dog
+communities (no view counts). Rights policy unchanged: popularity is not permission; everything standard-licence stays
+transformation review. See docs/SOURCES.md (last row) and docs/RUNBOOK.md.
+
 ## 1. What exists and what a dog pilot can reuse
 
 | Component | File(s) | Reusable as-is for dogs? |
