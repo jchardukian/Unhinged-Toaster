@@ -20,11 +20,11 @@ const execFileP = promisify(execFile);
  */
 export interface QcCheck { name: string; ok: boolean; severity: 'block' | 'warn'; detail: string }
 export interface QcResult { ok: boolean; score: number | null; checks: QcCheck[]; editorial: EditorialVerdict | null; cost_note: string }
-export interface EditorialVerdict { hook: number; payoff: number; entertainment: number; defects: string[]; brand_visible: boolean; captions_readable: boolean; rationale: string }
+export interface EditorialVerdict { hook: number; payoff: number; entertainment: number; commentary: number; storytelling: number; editing: number; defects: string[]; brand_visible: boolean; captions_readable: boolean; rationale: string }
 
 export const QC_LIMITS = {
   width: 1080, height: 1920, minSec: 5, maxSec: 60, maxBlackSec: 0.4, maxFreezeSec: 2.6, avDriftSec: 0.5, minLufs: -22, maxLufs: -8,
-  minHook: 6, minPayoff: 6, minEntertainment: 6, captionOverlap: 0.6,
+  minHook: 6, minPayoff: 6, minEntertainment: 6, minCommentary: 6, minStorytelling: 6, minEditing: 5, captionOverlap: 0.6,
 } as const;
 
 export interface QcInput {
@@ -33,6 +33,8 @@ export interface QcInput {
   headline: string; caption: string; publicText: string; hashtags: string[];
   words: Word[] | null;                 // caption words as rendered (edited timeline) when captions were burned in
   commentaryMode: 'outro_voice' | 'text_only' | 'none';
+  commentary?: string;                  // the toaster's original line (judged for meaning, not just presence)
+  edits?: { freeze: boolean; punchIn: boolean; replay: boolean; captions: boolean };
   /** productions for the same candidate already in the store (double production = duplicate) */
   siblingProductions: number;
   /** optional: re-transcribe the final render to verify caption accuracy (Whisper, ~$0.006) */
@@ -84,11 +86,14 @@ export function captionTimingIssues(words: Word[], durationSec: number): string[
 }
 
 /** Pure: the editorial gate. */
-export function editorialGate(e: EditorialVerdict): string[] {
+export function editorialGate(e: EditorialVerdict, commentaryMode: 'outro_voice' | 'text_only' | 'none' = 'outro_voice'): string[] {
   const r: string[] = [];
   if (e.hook < QC_LIMITS.minHook) r.push(`weak opening hook (${e.hook}/10)`);
   if (e.payoff < QC_LIMITS.minPayoff) r.push(`no clear comedic payoff (${e.payoff}/10)`);
   if (e.entertainment < QC_LIMITS.minEntertainment) r.push(`entertainment ${e.entertainment}/10`);
+  if (commentaryMode !== 'none' && e.commentary < QC_LIMITS.minCommentary) r.push(`commentary adds little (${e.commentary}/10)`);
+  if (e.storytelling < QC_LIMITS.minStorytelling) r.push(`weak setup-to-payoff storytelling (${e.storytelling}/10)`);
+  if (e.editing < QC_LIMITS.minEditing) r.push(`editing not purposeful (${e.editing}/10)`);
   if (e.defects.length) r.push(`visual defects: ${e.defects.join(', ')}`);
   if (!e.brand_visible) r.push('brand elements not visible');
   if (!e.captions_readable) r.push('captions / headline not readable');
@@ -98,7 +103,8 @@ export function editorialGate(e: EditorialVerdict): string[] {
 /** Pure: 0-10 editorial score from the vision verdict (hook, payoff, entertainment), minus a point per defect. */
 export function qcScore(e: EditorialVerdict | null): number | null {
   if (!e) return null;
-  return Math.max(0, Math.round(((e.hook + e.payoff + e.entertainment) / 3 - e.defects.length) * 10) / 10);
+  const dims = [e.hook, e.payoff, e.entertainment, e.commentary, e.storytelling].filter((v) => Number.isFinite(v));
+  return Math.max(0, Math.round((dims.reduce((a, b) => a + b, 0) / dims.length - e.defects.length) * 10) / 10);
 }
 
 const EDITORIAL_SYSTEM = `You are the independent quality reviewer for "The Unhinged Toaster", a comedy Shorts channel (angry toaster mascot,
@@ -108,11 +114,16 @@ worst you have seen, ten is the best; use the whole range and copy no number fro
 - hook: does the first moment make a scroller stop (clear subject, motion, readable headline)?
 - payoff: is there one clear comedic payoff visible in the later frames?
 - entertainment: would a general audience enjoy and share it?
+- commentary: does the toaster's line (given as "commentary") add a joke, a point of view or meaning beyond describing the
+  clip? Ten = a genuinely funny original take; zero = generic ("this is hilarious") or merely descriptive
+- storytelling: is there a setup that leads to the payoff (headline frames it, moment lands, ending is a button)?
+- editing: are the edits listed under "edits" purposeful for the joke (freeze before the payoff, punch-in on the
+  moment, replay of the beat, captions that help), not decoration?
 - defects (array, possibly empty) from: black_bars, letterboxing, cut_off_text, overlapping_overlays, unreadable_caption,
   blurry, stretched, watermark_covering_action, mascot_missing, black_frame, frozen_frame, wrong_aspect
 - brand_visible: the toaster mascot or wordmark appears
 - captions_readable: any on-screen text is legible and inside the frame
-- rationale: one sentence. Respond with a single JSON object: {"hook":n,"payoff":n,"entertainment":n,"defects":[],"brand_visible":true,"captions_readable":true,"rationale":""}`;
+- rationale: one sentence. Respond with a single JSON object: {"hook":n,"payoff":n,"entertainment":n,"commentary":n,"storytelling":n,"editing":n,"defects":[],"brand_visible":true,"captions_readable":true,"rationale":""}`;
 
 export async function qualityControl(cfg: Config, i: QcInput): Promise<QcResult> {
   const checks: QcCheck[] = [];
@@ -172,11 +183,11 @@ export async function qualityControl(cfg: Config, i: QcInput): Promise<QcResult>
     try {
       const sheet = await contactSheet(i.file, path.join(dir, 'qc_frames.jpg'));
       const b64 = sheetBase64(sheet);
-      const r = await chatJson<Partial<EditorialVerdict>>(cfg, EDITORIAL_SYSTEM, JSON.stringify({ headline: i.headline, caption: i.caption, duration_sec: Number(probe.duration.toFixed(1)), commentary_mode: i.commentaryMode, frames: 'attached: six frames, time order' }), { temperature: 0.1, maxTokens: 300, imageJpegBase64: b64 });
+      const r = await chatJson<Partial<EditorialVerdict>>(cfg, EDITORIAL_SYSTEM, JSON.stringify({ headline: i.headline, caption: i.caption, commentary: i.commentaryMode === 'none' ? '(none: the clip\'s own sound carries the ending)' : i.commentary ?? '', commentary_mode: i.commentaryMode, edits: i.edits ?? 'unknown', duration_sec: Number(probe.duration.toFixed(1)), frames: 'attached: six frames, time order' }), { temperature: 0.1, maxTokens: 350, imageJpegBase64: b64 });
       const n = (v: unknown) => Math.max(0, Math.min(10, Math.round(Number(v) || 0)));
-      editorial = { hook: n(r.hook), payoff: n(r.payoff), entertainment: n(r.entertainment), defects: Array.isArray(r.defects) ? r.defects.map(String).slice(0, 8) : [], brand_visible: r.brand_visible !== false, captions_readable: r.captions_readable !== false, rationale: String(r.rationale ?? '').slice(0, 300) };
-      const gate = editorialGate(editorial);
-      add('editorial', gate.length === 0, 'block', gate.join('; ') || `hook ${editorial.hook}, payoff ${editorial.payoff}, entertainment ${editorial.entertainment}`);
+      editorial = { hook: n(r.hook), payoff: n(r.payoff), entertainment: n(r.entertainment), commentary: i.commentaryMode === 'none' ? n(r.entertainment) : n(r.commentary), storytelling: n(r.storytelling), editing: n(r.editing), defects: Array.isArray(r.defects) ? r.defects.map(String).slice(0, 8) : [], brand_visible: r.brand_visible !== false, captions_readable: r.captions_readable !== false, rationale: String(r.rationale ?? '').slice(0, 300) };
+      const gate = editorialGate(editorial, i.commentaryMode);
+      add('editorial', gate.length === 0, 'block', gate.join('; ') || `hook ${editorial.hook}, payoff ${editorial.payoff}, entertainment ${editorial.entertainment}, commentary ${editorial.commentary}, story ${editorial.storytelling}, editing ${editorial.editing}`);
     } catch (e) {
       if (isFatal(e)) throw e;
       add('editorial', false, 'block', `vision check failed: ${(e as Error).message.slice(0, 160)}`);

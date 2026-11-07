@@ -25,10 +25,14 @@ test('qc pure rules: caption overlap, caption timing, editorial gate, score', ()
   assert.match(captionTimingIssues([{ word: 'late', start: 9, end: 11 }], 10)[0], /past the end/);
   assert.match(captionTimingIssues([{ word: 'fuck', start: 0, end: 0.2 }], 10)[0], /profanity/);
   assert.match(captionTimingIssues([{ word: 'b', start: 2, end: 2.2 }, { word: 'a', start: 1, end: 1.2 }], 10)[0], /out of order/);
-  const good = { hook: 8, payoff: 8, entertainment: 7, defects: [], brand_visible: true, captions_readable: true, rationale: '' };
+  const good = { hook: 8, payoff: 8, entertainment: 7, commentary: 7, storytelling: 8, editing: 6, defects: [], brand_visible: true, captions_readable: true, rationale: '' };
   assert.deepEqual(editorialGate(good), []);
-  assert.equal(qcScore(good), 7.7);
-  assert.equal(qcScore({ ...good, defects: ['cut_off_text'] }), 6.7);
+  assert.equal(qcScore(good), 7.6);
+  assert.equal(qcScore({ ...good, defects: ['cut_off_text'] }), 6.6);
+  assert.match(editorialGate({ ...good, commentary: 3 })[0], /commentary adds little/);
+  assert.deepEqual(editorialGate({ ...good, commentary: 3 }, 'none'), [], 'no commentary line to judge when the clip\'s own sound carries the ending');
+  assert.match(editorialGate({ ...good, storytelling: 4 })[0], /storytelling/);
+  assert.match(editorialGate({ ...good, editing: 2 })[0], /editing/);
   assert.equal(editorialGate({ ...good, hook: 4 }).length, 1);
   assert.equal(editorialGate({ ...good, brand_visible: false, captions_readable: false, defects: ['black_frame'] }).length, 3);
   assert.equal(qcScore(null), null);

@@ -86,7 +86,7 @@ export async function monitorAutopilot(cfg: Config, store: Store, opts: { consec
 export function autopilotMarkdown(v: AutopilotVerdict & { setting: AutopilotSetting | null }, cfg: Config): string {
   return [
     `## Unattended publishing: ${v.active ? '🟢 ACTIVE (posts are scheduled without approval)' : '⚪ off (drafts only)'}`,
-    ...(v.active ? [`- minimum QC score ${cfg.unattendedMinQc}; rights: documented licence or permission only; review-path footage ${cfg.unattendedReviewDrafts ? 'is drafted for optional approval' : 'is skipped'}`] : v.reasons.map((r) => `- ${r}`)),
+    ...(v.active ? [`- minimum QC score ${cfg.unattendedMinQc}; rights: documented licence or permission${cfg.unattendedFairUse ? ', or a "supportable" case-specific fair-use assessment (owner policy; uncertain ones are never scheduled)' : ' only'}; other review-path footage ${cfg.unattendedReviewDrafts ? 'is drafted for optional approval' : 'is skipped'}`] : v.reasons.map((r) => `- ${r}`)),
     '- stop at any time: GitHub → Actions → "Emergency stop" → Run workflow (unschedules every pending post), or set the repository variable EMERGENCY_STOP=true',
   ].join('\n');
 }

@@ -51,7 +51,7 @@ export interface PublishOptions {
    * autopilotStatus().active; every decision is logged through `decide`. Productions that fail the gate are drafted
    * only when `reviewDrafts` is true, otherwise skipped (logged as 'skip').
    */
-  unattended?: { active: true; minQc: number; reviewDrafts: boolean; decide: (d: Omit<import('@toaster/shared').Decision, 'id' | 'at'>) => Promise<import('@toaster/shared').Decision> };
+  unattended?: { active: true; minQc: number; reviewDrafts: boolean; fairUse: boolean; decide: (d: Omit<import('@toaster/shared').Decision, 'id' | 'at'>) => Promise<import('@toaster/shared').Decision> };
 }
 
 export interface PublishResult { created: number; adopted: number; skipped: number; failed: number; openSlots: number; weeks: string[] }
@@ -111,9 +111,12 @@ export async function publishWeek(cfg: Config, store: Store, opts: PublishOption
         // unattended mode: rights + QC gate decides between SCHEDULE, draft-for-optional-review, or skip
         let schedule: { decisionId: string } | null = null;
         if (opts.unattended) {
-          const elig = cand ? unattendedEligible(cand, prod, opts.unattended.minQc) : { eligible: false, reasons: ['candidate record missing'], basis: null, qcScore: prod.qc_score ?? null };
+          const elig = cand ? unattendedEligible(cand, prod, opts.unattended.minQc, { fairUse: opts.unattended.fairUse }) : { eligible: false, reasons: ['candidate record missing'], basis: null, qcScore: prod.qc_score ?? null };
           if (elig.eligible) {
-            const d = await opts.unattended.decide({ kind: 'schedule', production_id: prod.id, candidate_id: prod.candidate_id, service, slot_at: slotAt, buffer_post_id: null, reasons: JSON.stringify([`rights ${elig.basis} documented`, `QC ${elig.qcScore}`]), detail: JSON.stringify({ rights_evidence: cand?.rights_evidence, qc_score: elig.qcScore, headline: prod.headline }) });
+            const viaFairUse = String(elig.basis) === 'fair_use_assessment';
+            const d = await opts.unattended.decide({ kind: 'schedule', production_id: prod.id, candidate_id: prod.candidate_id, service, slot_at: slotAt, buffer_post_id: null,
+              reasons: JSON.stringify([viaFairUse ? 'basis: case-specific fair-use assessment "supportable" under the owner policy (NOT a licence; uncertainty: market effect assumed, not verified)' : `rights ${elig.basis} documented`, `QC ${elig.qcScore}`]),
+              detail: JSON.stringify({ rights_status: cand?.rights_status, rights_basis: cand?.rights_basis, rights_evidence: cand?.rights_evidence, fair_use: viaFairUse ? JSON.parse(prod.fair_use_json ?? 'null') : null, qc_score: elig.qcScore, headline: prod.headline, source_url: cand?.source_url, creator: cand?.detected_handle ?? cand?.author }) });
             schedule = { decisionId: d.id };
           } else if (opts.unattended.reviewDrafts) {
             await opts.unattended.decide({ kind: 'hold', production_id: prod.id, candidate_id: prod.candidate_id, service, slot_at: slotAt, buffer_post_id: null, reasons: JSON.stringify(elig.reasons), detail: JSON.stringify({ drafted_for_review: true }) });

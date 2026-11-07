@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { broadcastRisk, creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
+import { assessFairUse, broadcastRisk, creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
 import { analyzeClip } from './analyze.js';
 import { contactSheet, readWatermark, sheetBase64, sheetPathFor } from './frames.js';
 import { log, type Config } from '../config.js';
@@ -122,7 +122,7 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
 
     // copy + edit direction
     const copy = await writeCopy(cfg, c, transcript?.text, frames);
-    const commentaryMode: CommentaryMode = cfg.commentaryDefault === 'never' ? 'none' : cfg.commentaryDefault === 'always' ? 'outro_voice' : (copy.commentary_mode ?? 'outro_voice');
+    const commentaryMode: CommentaryMode = cfg.commentaryDefault === 'never' ? 'none' : cfg.commentaryDefault === 'always' ? 'outro_voice' : cfg.commentaryDefault === 'text_only' ? 'text_only' : (copy.commentary_mode ?? 'outro_voice');
     const vo = commentaryMode === 'outro_voice' ? await synthesiseCommentary(cfg, copy.commentary, path.join(dir, 'vo.mp3')) : null;
 
     // clip-specific edit plan: detected peak moment -> freeze / punch-in / replay / sticker
@@ -163,7 +163,8 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     const captionWords = transcript?.words.length ? transcript.words.map((w) => ({ word: w.word, start: timeline.map(w.start), end: timeline.map(w.end) })).filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end) && w.end >= 0) : null;
     const siblings = (await store.listProductions({ candidate_id: c.id })).length;
     const qc = await qualityControl(cfg, {
-      file: outPath, candidate: c, headline: copy.headline, caption: copy.caption, hashtags: copy.hashtags, commentaryMode,
+      file: outPath, candidate: c, headline: copy.headline, caption: copy.caption, hashtags: copy.hashtags, commentaryMode, commentary: copy.commentary,
+      edits: { freeze: !!timeline.beats.freeze, punchIn: !!timeline.beats.punchIn, replay: !!timeline.beats.replay, captions: (transcript?.words.length ?? 0) >= 6 },
       publicText: [copy.caption, attribution, copy.hashtags.map((t) => `#${t}`).join(' ')].join('\n\n'), words: captionWords, siblingProductions: siblings,
       transcribe: process.env.QC_RETRANSCRIBE === 'false' ? undefined : async (file) => { const a = await extractAudio(file, path.join(dir, 'qc_audio.mp3')); return a ? transcribe(cfg, a) : null; },
     });
@@ -179,6 +180,13 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     const up = await withRetry(`upload ${c.id}`, () => uploadPublic(cfg, outPath, key, 'video/mp4'), { attempts: 3, baseMs: 2000 });
     const thumb = await withRetry(`upload thumb ${c.id}`, () => uploadPublic(cfg, r.thumbnailPath, key.replace(/\.mp4$/, '.jpg'), 'image/jpeg'), { attempts: 3, baseMs: 2000 });
 
+    // case-specific fair-use assessment (owner policy): facts + explicit verdict and uncertainty; never a licence
+    const fairUse = basis === 'cleared' ? null : assessFairUse({
+      candidate: c, commentary: copy.commentary, commentaryMode, headline: copy.headline,
+      edits: { freeze: !!timeline.beats.freeze, punchIn: !!timeline.beats.punchIn, replay: !!timeline.beats.replay, captions: (transcript?.words.length ?? 0) >= 6, muteSource },
+      editedSeconds: r.editedClipSec, transcriptChars: transcript?.text.length ?? 0,
+    });
+    if (fairUse) log.info(`fair-use assessment ${c.id}: ${fairUse.verdict} (${fairUse.factors.filter((f) => f.state !== 'for').map((f) => `${f.name}:${f.state}`).join(', ') || 'all factors for'})`);
     const prod: Production = {
       id: ulid(), candidate_id: c.id, headline: copy.headline, commentary: copy.commentary,
       caption_text: copy.caption,
@@ -191,6 +199,7 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
       content_format: c.content_format ?? 'general_viral',
       production_cost_usd: Math.round((costOf(currentUsage()).total_usd - costAtStart) * 10000) / 10000,
       qc_score: qc.score, qc_json: JSON.stringify({ ok: qc.ok, score: qc.score, checks: qc.checks, editorial: qc.editorial }),
+      fair_use_json: fairUse ? JSON.stringify(fairUse) : null,
       created_at: now(), updated_at: now(),
     };
     await store.upsertProduction(prod);

@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { buildWeekPlan, canProduce, permissionRequestMessage, type Candidate, type RightsBasis, type SourceAdapter } from '@toaster/shared';
+import { buildWeekPlan, canProduce, permissionRequestMessage, ulid, type Candidate, type RightsBasis, type SourceAdapter } from '@toaster/shared';
 import { alert } from './alerts.js';
 import { loadConfig, log, repoRoot, type Config } from './config.js';
 import { makeStore, type Store } from './store.js';
@@ -220,9 +220,40 @@ async function main() {
     case 'calibration': { const r = calibrationReport(await store.listProductions(), await store.listPosts(), cfg.unattendedMinQc); console.log(r.markdown); writeSummary(r.markdown); return; }
     case 'qc': {
       const file = String(flags.file ?? ''); if (!file) throw new Error('--file required');
-      const r = await qualityControl(cfg, { file, candidate: { id: 'manual', safety_flags: '[]', source_url: 'https://example.invalid/src', author: null, rights_status: 'cleared', rights_basis: 'owned' }, headline: String(flags.headline ?? 'QC TEST'), caption: String(flags.caption ?? 'caption'), publicText: `caption\n📩 contact`, hashtags: ['funny', 'shorts', 'fails'], words: null, commentaryMode: 'outro_voice', siblingProductions: 0, editorial: flags['no-editorial'] ? false : true });
+      const r = await qualityControl(cfg, { file, candidate: { id: 'manual', safety_flags: '[]', source_url: 'https://example.invalid/src', author: null, rights_status: 'cleared', rights_basis: 'owned' }, headline: String(flags.headline ?? 'QC TEST'), caption: String(flags.caption ?? 'caption'), commentary: flags.commentary ? String(flags.commentary) : undefined, publicText: `caption\n📩 contact`, hashtags: ['funny', 'shorts', 'fails'], words: null, commentaryMode: flags.commentary ? 'outro_voice' : 'none', siblingProductions: 0, editorial: flags['no-editorial'] ? false : true });
       console.log(qcSummaryLine(r)); for (const c of r.checks) console.log(`${c.ok ? 'ok  ' : c.severity === 'warn' ? 'warn' : 'FAIL'} ${c.name}: ${c.detail}`);
       if (!r.ok) process.exitCode = 1; return;
+    }
+    case 'buffer:probe-schedule': {
+      // Live Buffer scheduling test that can never publish: schedules an existing finished video 400 days out through the
+      // guarded autopilot path, reads the post back (status must be "scheduled"), then deletes it within seconds.
+      const { bufferClient, channelFor } = await import('./steps/publish.js');
+      const { AUTOPILOT_AUTHORIZATION_PHRASE, toBufferDueAt } = await import('@toaster/shared');
+      const client = bufferClient(cfg);
+      const videoUrl = String(flags.video ?? '');
+      if (!/^https?:\/\//.test(videoUrl)) throw new Error('--video <public mp4 url> required');
+      const dueAt = new Date(Date.now() + 400 * 86400_000); dueAt.setUTCMinutes(0, 0, 0);
+      const decisionId = ulid();
+      const results: string[] = [];
+      for (const service of ['youtube', 'tiktok'] as const) {
+        let postId: string | null = null;
+        try {
+          const post = await client.createVideoPost({
+            channelId: channelFor(cfg, service), text: 'Unhinged Toaster scheduling probe (deleted automatically within seconds).', videoUrl,
+            dueAt: toBufferDueAt(dueAt.toISOString(), cfg.tz), mode: 'customScheduled', saveToDraft: false,
+            autopilot: { authorization: process.env.UNATTENDED_AUTHORIZATION ?? '', decisionId }, videoTitle: 'PROBE',
+            youtube: service === 'youtube' ? { title: 'PROBE', categoryId: '23', privacy: 'private', madeForKids: false, notifySubscribers: false, isAiGenerated: true, license: 'youtube' } : undefined,
+            tiktok: service === 'tiktok' ? { title: 'PROBE', isAiGenerated: true } : undefined,
+          });
+          postId = post.id;
+          const back = await client.getPost(post.id);
+          results.push(`${service}: created ${post.id} status=${post.status} dueAt=${post.dueAt} | read-back status=${back?.status} dueAt=${back?.dueAt}`);
+        } catch (e) { results.push(`${service}: FAILED ${(e as Error).message.slice(0, 200)}`); }
+        if (postId) { try { const ok = await client.deletePost(postId); results.push(`${service}: deleted ${postId} -> ${ok}; read-back after delete: ${JSON.stringify(await client.getPost(postId).catch((e: Error) => e.message.slice(0, 80)))}`); } catch (e) { results.push(`${service}: DELETE FAILED ${(e as Error).message.slice(0, 200)} (post ${postId} must be removed by hand)`); process.exitCode = 1; } }
+      }
+      const md = ['## Buffer scheduling probe (far-future scheduled post, deleted immediately)', ...results.map((r) => `- ${r}`), `- guard check: ${AUTOPILOT_AUTHORIZATION_PHRASE === (process.env.UNATTENDED_AUTHORIZATION ?? '') ? 'phrase accepted by the client' : 'phrase missing (creates must have failed with the publish guard)'}`].join('\n');
+      console.log(md); writeSummary(md);
+      return;
     }
     case 'status': return status(store);
     case 'buffer:tags': {
@@ -278,7 +309,7 @@ async function publishWithAutopilot(cfg: Config, store: Store, opts: { dryRun?: 
   const v = await autopilotStatus(cfg, store);
   writeSummary(autopilotMarkdown(v, cfg));
   if (!v.active) return publishWeek(cfg, store, { dryRun: opts.dryRun });
-  return publishWeek(cfg, store, { dryRun: opts.dryRun, unattended: { active: true, minQc: cfg.unattendedMinQc, reviewDrafts: cfg.unattendedReviewDrafts, decide: (d) => logDecision(store, d) } });
+  return publishWeek(cfg, store, { dryRun: opts.dryRun, unattended: { active: true, minQc: cfg.unattendedMinQc, reviewDrafts: cfg.unattendedReviewDrafts, fairUse: cfg.unattendedFairUse, decide: (d) => logDecision(store, d) } });
 }
 
 async function discoverInto(cfg: Config, store: Store, sources: SourceAdapter[], limit: number): Promise<number> {

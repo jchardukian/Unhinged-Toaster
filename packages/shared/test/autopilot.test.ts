@@ -54,3 +54,37 @@ test('Buffer client: a non-draft post needs the authorized autopilot block with 
   assert.equal(post.status, 'scheduled');
   await assert.rejects(client.createVideoPost({ ...base, mode: 'shareNow', autopilot: { authorization: AUTOPILOT_AUTHORIZATION_PHRASE, decisionId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' } }), /publish guard/, 'immediate publishing is never allowed');
 });
+
+// ---------------------------------------------------------------- fair-use assessment (owner policy, 2026-11-07)
+import { assessFairUse } from '../src/fairuse.js';
+
+const ugc = { source_platform: 'reddit' as const, rights_status: 'transformation_review' as const, rights_basis: null, copyright_risk: 'low' as const, copyright_risk_reasons: '["self-filmed phone footage"]', detected_platform: null, detected_handle: null, safety_flags: '[]', title: 'My dog vs the trash can', description: null, visual_summary: 'A cat climbs into a bathroom bin and tips it over.', author: 'u/poster', duration_sec: 25 };
+const edits = { freeze: true, punchIn: true, replay: false, captions: true, muteSource: false };
+
+test('fair-use assessment: supportable only when every verifiable factor is for; model ratings can only lower it', () => {
+  const ok = assessFairUse({ candidate: ugc, commentary: 'That cat just filed for bankruptcy in the bin.', commentaryMode: 'text_only', headline: 'CATS VS TRASH CAN', edits, editedSeconds: 24, transcriptChars: 0 });
+  assert.equal(ok.verdict, 'supportable');
+  assert.ok(ok.factors.find((f) => f.name === 'market_effect')?.state === 'uncertain', 'market effect is always recorded as an assumption');
+  assert.match(ok.note, /not a licence/i);
+  assert.equal(assessFairUse({ candidate: { ...ugc, copyright_risk: 'medium' }, commentary: 'x'.repeat(20), commentaryMode: 'text_only', headline: 'h', edits, editedSeconds: 24, transcriptChars: 0 }).verdict, 'uncertain');
+  assert.equal(assessFairUse({ candidate: { ...ugc, detected_platform: 'tiktok', detected_handle: 'realcreator' }, commentary: 'x'.repeat(20), commentaryMode: 'text_only', headline: 'h', edits, editedSeconds: 24, transcriptChars: 0 }).verdict, 'uncertain', 'foreign watermark: poster probably not the creator');
+  assert.equal(assessFairUse({ candidate: { ...ugc, copyright_risk: 'high' }, commentary: 'x'.repeat(20), commentaryMode: 'text_only', headline: 'h', edits, editedSeconds: 24, transcriptChars: 0 }).verdict, 'not_supportable');
+  assert.equal(assessFairUse({ candidate: { ...ugc, title: 'F1 podium celebration goes wrong' }, commentary: 'x'.repeat(20), commentaryMode: 'text_only', headline: 'h', edits, editedSeconds: 24, transcriptChars: 0 }).verdict, 'not_supportable', 'broadcast keyword screen');
+  assert.equal(assessFairUse({ candidate: ugc, commentary: '', commentaryMode: 'none', headline: 'h', edits: { ...edits, freeze: false, punchIn: false, captions: false }, editedSeconds: 24, transcriptChars: 0 }).verdict, 'not_supportable', 'bare re-upload');
+  assert.equal(assessFairUse({ candidate: { ...ugc, safety_flags: '["copyrighted_music"]' }, commentary: 'x'.repeat(20), commentaryMode: 'text_only', headline: 'h', edits, editedSeconds: 24, transcriptChars: 0 }).verdict, 'not_supportable', 'music not muted');
+  assert.equal(assessFairUse({ candidate: { ...ugc, safety_flags: '["copyrighted_music"]' }, commentary: 'x'.repeat(20), commentaryMode: 'text_only', headline: 'h', edits: { ...edits, muteSource: true }, editedSeconds: 24, transcriptChars: 0 }).verdict, 'supportable', 'music muted');
+  assert.equal(assessFairUse({ candidate: { ...ugc, safety_flags: '["private_person_mocking"]' }, commentary: 'x'.repeat(20), commentaryMode: 'text_only', headline: 'h', edits, editedSeconds: 24, transcriptChars: 0 }).verdict, 'not_supportable');
+});
+
+test('unattended eligibility with the fair-use policy: supportable assessments qualify, uncertain never, and the policy is off by default', () => {
+  const review = { ...cleared, rights_status: 'transformation_review' as const, rights_basis: null, rights_evidence: null, copyright_risk: 'low' as const };
+  const supportable = JSON.stringify(assessFairUse({ candidate: ugc, commentary: 'That cat just filed for bankruptcy in the bin.', commentaryMode: 'text_only', headline: 'h', edits, editedSeconds: 24, transcriptChars: 0 }));
+  const uncertain = JSON.stringify(assessFairUse({ candidate: { ...ugc, copyright_risk: 'medium' }, commentary: 'x'.repeat(20), commentaryMode: 'text_only', headline: 'h', edits, editedSeconds: 24, transcriptChars: 0 }));
+  assert.equal(unattendedEligible(review, { ...prod, fair_use_json: supportable }).eligible, false, 'policy off by default');
+  const on = unattendedEligible(review, { ...prod, fair_use_json: supportable }, 7, { fairUse: true });
+  assert.equal(on.eligible, true); assert.equal(String(on.basis), 'fair_use_assessment');
+  assert.equal(unattendedEligible(review, { ...prod, fair_use_json: uncertain }, 7, { fairUse: true }).eligible, false);
+  assert.equal(unattendedEligible(review, { ...prod, fair_use_json: null }, 7, { fairUse: true }).eligible, false, 'no assessment recorded');
+  assert.equal(unattendedEligible(review, { ...prod, fair_use_json: supportable, qc_score: 5 }, 7, { fairUse: true }).eligible, false, 'QC still applies');
+  assert.equal(unattendedEligible({ ...review, rights_status: 'unknown' }, { ...prod, fair_use_json: supportable }, 7, { fairUse: true }).eligible, false, 'only transformation-review candidates');
+});

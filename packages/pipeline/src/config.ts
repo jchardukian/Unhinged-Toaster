@@ -53,7 +53,7 @@ export interface Config {
   bufferTagReviewId: string | undefined;
   bufferTagClearedId: string | undefined;
   contactEmail: string;
-  commentaryDefault: 'auto' | 'always' | 'never';
+  commentaryDefault: 'auto' | 'always' | 'never' | 'text_only';
   allowLowQuality: boolean;
   musicDefault: 'auto' | 'always' | 'never';
   stickers: boolean;
@@ -83,6 +83,8 @@ export interface Config {
   unattendedMinQc: number;
   /** keep drafting transformation-review videos for optional owner approval while autopilot runs (default false) */
   unattendedReviewDrafts: boolean;
+  /** owner policy: schedule productions whose fair-use assessment is "supportable" (uncertain ones are never scheduled) */
+  unattendedFairUse: boolean;
   workDir: string;
   assetsDir: string;
   templateDir: string;
@@ -120,7 +122,7 @@ export function loadConfig(): Config {
     youtubeViralWindows: (e.YOUTUBE_VIRAL_WINDOWS || 'today,week,month,alltime').split(',').map((x) => x.trim()).filter((x): x is 'today' | 'week' | 'month' | 'alltime' => ['today', 'week', 'month', 'alltime'].includes(x)),
     redditWindows: (e.REDDIT_WINDOWS || 'day,week').split(',').map((x) => x.trim()).filter((x): x is 'day' | 'week' | 'month' => ['day', 'week', 'month'].includes(x)),
     musicDefault: (['auto', 'always', 'never'].includes(e.MUSIC_DEFAULT ?? '') ? e.MUSIC_DEFAULT : 'auto') as 'auto' | 'always' | 'never',
-    commentaryDefault: (['auto', 'always', 'never'].includes(e.COMMENTARY_DEFAULT ?? '') ? e.COMMENTARY_DEFAULT : 'auto') as 'auto' | 'always' | 'never',
+    commentaryDefault: (['auto', 'always', 'never', 'text_only'].includes(e.COMMENTARY_DEFAULT ?? '') ? e.COMMENTARY_DEFAULT : 'auto') as 'auto' | 'always' | 'never' | 'text_only',
     youtubeKey: e.YOUTUBE_API_KEY,
     enableYoutubeCc: e.ENABLE_YOUTUBE_CC === 'true',
     enableYoutubeTransform: e.ENABLE_YOUTUBE_TRANSFORM !== 'false',
@@ -141,6 +143,7 @@ export function loadConfig(): Config {
     emergencyStop: e.EMERGENCY_STOP === 'true',
     unattendedMinQc: Number(e.UNATTENDED_MIN_QC) > 0 ? Number(e.UNATTENDED_MIN_QC) : 7,
     unattendedReviewDrafts: e.UNATTENDED_REVIEW_DRAFTS === 'true',
+    unattendedFairUse: e.UNATTENDED_FAIR_USE === 'true',
     workDir: path.resolve(root, e.WORK_DIR ?? 'work'),
     assetsDir: path.join(root, 'assets'),
     templateDir: path.join(root, 'template'),

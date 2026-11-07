@@ -146,6 +146,7 @@ export interface Production {
   production_cost_usd?: number | null;         // metered: generation + LLM + TTS + Whisper for this one video
   qc_score?: number | null;                    // automated QC editorial score 0-10 (null = not run)
   qc_json?: string | null;                     // full QC result JSON (checks with severity, details)
+  fair_use_json?: string | null;               // case-specific fair-use assessment (shared/fairuse.ts); not a licence
   created_at: string;
   updated_at: string;
 }

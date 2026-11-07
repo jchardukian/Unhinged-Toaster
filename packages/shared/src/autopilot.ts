@@ -1,5 +1,6 @@
 import type { Candidate, Production, RightsBasis } from './types.js';
 import { isCleared } from './rights.js';
+import { parseFairUse } from './fairuse.js';
 
 /**
  * Unattended publishing ("autopilot"): the rules that decide whether the pipeline may SCHEDULE a post in Buffer with no
@@ -48,12 +49,24 @@ export function autopilotActive(i: AutopilotInputs): AutopilotVerdict {
 export interface EligibilityVerdict { eligible: boolean; reasons: string[]; basis: RightsBasis | null; qcScore: number | null }
 
 /** Pure: is this finished production allowed to be scheduled unattended? Rights first, then quality. */
-export function unattendedEligible(c: Pick<Candidate, 'rights_status' | 'rights_basis' | 'rights_evidence' | 'copyright_risk' | 'safety_flags' | 'status'>, p: Pick<Production, 'qc_score' | 'qc_json' | 'public_url'>, minQc = AUTOPILOT_DEFAULT_MIN_QC): EligibilityVerdict {
+export interface EligibilityOptions {
+  /** owner policy UNATTENDED_FAIR_USE=true: a production whose recorded fair-use assessment is "supportable" may be scheduled; "uncertain" / "not_supportable" never */
+  fairUse?: boolean;
+}
+export function unattendedEligible(c: Pick<Candidate, 'rights_status' | 'rights_basis' | 'rights_evidence' | 'copyright_risk' | 'safety_flags' | 'status'>, p: Pick<Production, 'qc_score' | 'qc_json' | 'public_url' | 'fair_use_json'>, minQc = AUTOPILOT_DEFAULT_MIN_QC, opts: EligibilityOptions = {}): EligibilityVerdict {
   const reasons: string[] = [];
-  const basis = c.rights_basis ?? null;
-  if (!isCleared(c)) reasons.push(`rights not documented (${c.rights_status}/${basis ?? 'none'}): unattended publishing needs an explicit licence or permission`);
-  else if (!basis || !UNATTENDED_RIGHTS_BASES.includes(basis)) reasons.push(`rights basis ${basis ?? 'none'} is not in the unattended allow-list`);
-  if (!c.rights_evidence) reasons.push('no rights evidence recorded');
+  let basis = c.rights_basis ?? null;
+  const fu = parseFairUse(p.fair_use_json);
+  if (isCleared(c)) {
+    if (!basis || !UNATTENDED_RIGHTS_BASES.includes(basis)) reasons.push(`rights basis ${basis ?? 'none'} is not in the unattended allow-list`);
+    if (!c.rights_evidence) reasons.push('no rights evidence recorded');
+  } else if (opts.fairUse && c.rights_status === 'transformation_review') {
+    if (!fu) reasons.push('no fair-use assessment recorded');
+    else if (fu.verdict !== 'supportable') reasons.push(`fair-use assessment ${fu.verdict}: ${fu.summary.slice(0, 200)}`);
+    else basis = 'fair_use_assessment' as unknown as RightsBasis; // reported as such in the decision log; never stored as a licence
+  } else {
+    reasons.push(`rights not documented (${c.rights_status}/${basis ?? 'none'}): unattended publishing needs an explicit licence or permission${c.rights_status === 'transformation_review' ? ', or the owner\'s fair-use policy (UNATTENDED_FAIR_USE)' : ''}`);
+  }
   if (c.copyright_risk === 'high') reasons.push('copyright risk high');
   const flags = safeFlags(c.safety_flags);
   if (flags.length) reasons.push(`safety flags: ${flags.join(', ')}`);
