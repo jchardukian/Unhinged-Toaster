@@ -48,8 +48,11 @@ export async function transcribeDetailed(cfg: Config, audioFile: string): Promis
   const base = { language: j.language ?? null, text: (j.text ?? '').trim(), wordCount: words.length };
   if (words.length === 0 || base.text.length < 2) return { ...base, transcript: null, discarded: 'no_speech' };
   // captions are English-only: any non-English speech is reported to the language gate, never captioned
-  if (!isEnglishSpeech(base)) { log.info(`speech in ${base.language}: "${base.text.slice(0, 60)}" (not captioned; language gate decides)`); return { ...base, transcript: null, discarded: 'non_english' }; }
+  // known Whisper hallucinations (subtitle credits, "thanks for watching", repetitions) are not speech in ANY language;
+  // only the script check is skipped for non-English, because real foreign speech is what the language gate needs
   const h = isHallucination(j.text, words);
+  if (h && h !== 'non_latin_script') { log.info(`transcript discarded as Whisper hallucination (${h}): "${base.text.slice(0, 60)}"`); return { ...base, language: null, wordCount: 0, transcript: null, discarded: h }; }
+  if (!isEnglishSpeech(base)) { log.info(`speech in ${base.language}: "${base.text.slice(0, 60)}" (not captioned; language gate decides)`); return { ...base, transcript: null, discarded: 'non_english' }; }
   if (h) { log.info(`transcript discarded as Whisper hallucination (${h}): "${base.text.slice(0, 60)}"`); return { ...base, transcript: null, discarded: h }; }
   return { ...base, transcript: { text: base.text, words }, discarded: null };
 }
@@ -77,12 +80,12 @@ export function isHallucination(text: string, words: Word[]): string | null {
   const t = text.trim();
   const letters = t.replace(/[^\p{L}]/gu, '');
   if (letters.length === 0) return 'no_letters';
-  const latin = letters.replace(/[^A-Za-z\u00C0-\u024F]/g, '').length;
-  if (latin / letters.length < 0.6) return 'non_latin_script';
   const toks = t.toLowerCase().split(/\s+/).filter(Boolean);
   if (toks.length >= 4 && new Set(toks).size / toks.length < 0.35) return 'repetitive';
   if (/^(thanks? (you )?for watching|thank you|subscribe|like and subscribe|see you (in the )?next|bye[.!]*)[.!\s]*$/i.test(t)) return 'stock_phrase';
-  if (/(more videos|our channel|subscribe to|subtitles? by|amara\.org|www\.|\.com\b|copyright|all rights reserved)/i.test(t) && toks.length <= 12) return 'stock_phrase';
+  if (/(more videos|our channel|subscribe to|subtitles? by|subt[ií]tulos|untertitel|sous-titres|amara\.org|www\.|\.com\b|\.org\b|copyright|all rights reserved|抖音|字幕)/i.test(t) && toks.length <= 12) return 'stock_phrase';
+  const latin = letters.replace(/[^A-Za-z\u00C0-\u024F]/g, '').length;
+  if (latin / letters.length < 0.6) return 'non_latin_script';
   const span = words[words.length - 1].end - words[0].start;
   const spoken = words.reduce((a, w) => a + Math.max(0, w.end - w.start), 0);
   if (toks.length >= 6 && span > 3 && spoken / span < 0.08) return 'implausible_timing';
