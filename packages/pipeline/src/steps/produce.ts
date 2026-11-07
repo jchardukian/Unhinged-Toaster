@@ -10,6 +10,7 @@ import { writeCopy } from './copy.js';
 import { downloadMedia, extractAudio, ffprobe, mediaDuration, videoPhash } from './media.js';
 import { loadTemplate, pickMusic, renderShort } from './render.js';
 import { scoreCandidate } from './score.js';
+import { planSfx } from './sfx.js';
 import { synthesiseCommentary } from './tts.js';
 import { uploadPublic } from './upload.js';
 import { withRetry } from '../retry.js';
@@ -145,9 +146,12 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     // render
     const outPath = path.join(dir, `${c.id}.final.mp4`);
     const renderStart = Date.now();
+    // comedic sound effects on the edit beats (freeze -> record scratch, punch-in -> boing/thud, replay -> whoosh); only
+    // when the real library exists (SFX_PROVIDER=elevenlabs built it) or placeholders were explicitly chosen (synth)
+    const sfx = planSfx(cfg, timeline.beats, timeline.map, { category: c.category });
     const r = await withRetry(`render ${c.id}`, () => renderShort(cfg, template, {
       clipPath: src, headline: copy.headline, commentary: copy.commentary, commentaryMode, voPath: vo, words: transcript?.words ?? null,
-      musicPath: cfg.musicDefault === 'never' ? null : (copy.music === 'none' && cfg.musicDefault !== 'always') ? null : pickMusic(cfg, c.category), outPath, workDir: dir, timeline,
+      musicPath: cfg.musicDefault === 'never' ? null : (copy.music === 'none' && cfg.musicDefault !== 'always') ? null : pickMusic(cfg, c.category), outPath, workDir: dir, timeline, sfx,
     }), { attempts: 2, baseMs: 1000 });
     recordRender((Date.now() - renderStart) / 1000);
     recordUpload(fs.statSync(outPath).size + (fs.existsSync(r.thumbnailPath) ? fs.statSync(r.thumbnailPath).size : 0));
@@ -164,7 +168,7 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
       hashtags: JSON.stringify(copy.hashtags), voice_id: vo ? cfg.elevenVoiceId ?? 'auto' : null,
       music_track: null, r2_key: up.uploaded ? key : null, public_url: up.uploaded ? up.url : null,
       thumbnail_url: thumb.uploaded ? thumb.url : null, duration_sec: r.durationSec,
-      render_log: JSON.stringify({ transcriptWords: transcript?.words.length ?? 0, vo: !!vo, commentaryMode, peak: analysis.peak, dropped: timeline.dropped, cmd: r.command.slice(0, 12) }),
+      render_log: JSON.stringify({ transcriptWords: transcript?.words.length ?? 0, vo: !!vo, commentaryMode, peak: analysis.peak, dropped: timeline.dropped, sfx: sfx.map((s) => `${path.basename(s.path)}@${s.at.toFixed(2)}`), cmd: r.command.slice(0, 12) }),
       reuse_basis: basis,
       edit_plan: JSON.stringify(timeline.beats),
       content_format: c.content_format ?? 'general_viral',

@@ -79,6 +79,11 @@ jobs:
             limit: '10'
             fetch: '2'
             clients: web_embedded
+          - name: tiktok
+            sources: tiktok
+            limit: '10'
+            fetch: '1'
+            clients: ''
     name: probe-${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
@@ -95,6 +100,8 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           YTDLP_YOUTUBE_CLIENTS: ${{ matrix.clients }}
           YTDLP_ASSUME_FETCHABLE: 'true'
+          # TikTok fetch probe: the owner's curated creators when set, otherwise one well-known public dog creator
+          TIKTOK_ACCOUNTS: ${{ vars.TIKTOK_ACCOUNTS || 'tuckerbudzyn' }}
         run: node packages/pipeline/dist/cli.js discover --dry-run --sources "${{ matrix.sources }}" --limit "${{ matrix.limit }}" --fetch "${{ matrix.fetch }}"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -103,3 +110,39 @@ jobs:
           path: work/probe/
           if-no-files-found: ignore
           retention-days: 3
+
+  # Viral funny-dog discovery from a real GitHub-runner IP (the "Dog shortlist" workflow is only dispatchable once it is
+  # on main). Runs when the push's commit message contains [dogprobe]. Discovery only: no store, no drafts, ~$0.10.
+  dog-shortlist-probe:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[dogprobe]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && pip install -q "yt-dlp[default]"
+      - run: npm ci && npm run build
+      - name: dog-shortlist (discovery only)
+        timeout-minutes: 25
+        env:
+          WORK_DIR: ./work
+          API_BUDGET_USD: '1'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          TIKTOK_ACCOUNTS: ${{ vars.TIKTOK_ACCOUNTS }}
+        run: node packages/pipeline/dist/cli.js dog-shortlist --top 30 --limit 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dog-shortlist-probe
+          path: |
+            work/dog-shortlist.md
+            work/dog-shortlist.json
+            work/usage.jsonl
+          if-no-files-found: ignore
+          retention-days: 7

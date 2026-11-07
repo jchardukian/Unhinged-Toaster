@@ -196,6 +196,8 @@ export const REDDIT_SOURCES: { sub: string; category: ContentCategory; guess?: b
   { sub: 'AnimalsBeingDerps', category: 'funny_animals' },
   { sub: 'AnimalsBeingJerks', category: 'funny_animals' },
   { sub: 'WhatsWrongWithYourDog', category: 'funny_animals' },
+  { sub: 'rarepuppers', category: 'funny_animals' },
+  { sub: 'dogvideos', category: 'funny_animals' },
   { sub: 'nextfuckinglevel', category: 'unbelievable' },
   { sub: 'ContagiousLaughter', category: 'wholesome_reactions' },
   { sub: 'MadeMeSmile', category: 'wholesome_reactions' },
@@ -374,6 +376,9 @@ export const YT_VIRAL_TAGS: { tag: string; category: ContentCategory }[] = [
   { tag: 'instantkarma', category: 'people_fails' }, { tag: 'funnyvideos', category: 'people_fails' }, { tag: 'comedy', category: 'people_fails' },
   { tag: 'funnyanimals', category: 'funny_animals' }, { tag: 'funnycats', category: 'funny_animals' }, { tag: 'funnydogs', category: 'funny_animals' },
   { tag: 'cats', category: 'funny_animals' }, { tag: 'dogs', category: 'funny_animals' }, { tag: 'animals', category: 'funny_animals' },
+  // funny-dog focus (owner priority): breed and dog-meme shelves surface single-creator virals the generic tags miss
+  { tag: 'funnydog', category: 'funny_animals' }, { tag: 'dog', category: 'funny_animals' }, { tag: 'dogfails', category: 'funny_animals' }, { tag: 'dogmemes', category: 'funny_animals' },
+  { tag: 'puppy', category: 'funny_animals' }, { tag: 'husky', category: 'funny_animals' }, { tag: 'goldenretriever', category: 'funny_animals' }, { tag: 'corgi', category: 'funny_animals' },
   { tag: 'unexpected', category: 'unbelievable' }, { tag: 'waitforit', category: 'unbelievable' }, { tag: 'caughtoncamera', category: 'unbelievable' },
   { tag: 'wholesome', category: 'wholesome_reactions' }, { tag: 'heartwarming', category: 'wholesome_reactions' }, { tag: 'reaction', category: 'wholesome_reactions' },
 ];
@@ -443,6 +448,17 @@ export async function discoverYouTubeViral(cfg: Config, limit: number, windows: 
       const items = await youtubeVideosApi(cfg.youtubeKey, picked.slice(i, i + 50).map((r) => r.id)).catch((e) => { log.warn(`youtube_viral Data API: ${(e as Error).message}`); return [] as YtVideo[]; });
       for (const it of items) meta.set(it.id, ytMetaFromApi(it));
     }
+  }
+  // Embedded-player client: exact views / likes / duration / upload date from datacenter IPs where the default
+  // clients are bot-walled (no media formats, so width/height stay unknown until download). No cookies, no key.
+  if (meta.size < picked.length) {
+    for (let i = 0; i < picked.length; i += 20) {
+      const missing = picked.slice(i, i + 20).filter((r) => !meta.has(r.id));
+      if (missing.length === 0) continue;
+      const full = await ytdlpJson(missing.map((r) => `https://www.youtube.com/watch?v=${r.id}`), { youtube: true, embeddedMeta: true }).catch(() => []);
+      for (const m of full) if (m.id && m.view_count != null) meta.set(String(m.id), m);
+    }
+    log.info(`youtube_viral embedded-player metadata: ${meta.size}/${picked.length}`);
   }
   if (meta.size < picked.length && (!cfg.youtubeKey || !youtubeFetchGuard(cfg).blocked)) {
     for (let i = 0; i < picked.length; i += 20) {

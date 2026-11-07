@@ -35,7 +35,17 @@ export function heuristicScore(c: Pick<Candidate,
   if (c.width && c.height && c.width > c.height) fit -= 10; // landscape still OK in our frame
   fit = clamp(fit, 0, 100);
 
+  // proven reach (owner priority: 1M+ verified views first). Only when a real view count exists (YouTube / TikTok);
+  // Reddit carries none, so its blend is unchanged.
+  if (c.views != null && c.views > 0) {
+    return round1(velocityScore * 0.35 + depthScore * 0.1 + ratioScore * 0.1 + fit * 0.2 + reachScore(c.views) * 0.25);
+  }
   return round1(velocityScore * 0.45 + depthScore * 0.15 + ratioScore * 0.15 + fit * 0.25);
+}
+
+/** 0-100 from verified views on a log scale: 10k -> 0, 100k -> 50, 1M+ -> 100. */
+export function reachScore(views: number): number {
+  return clamp(((Math.log10(Math.max(views, 1)) - 4) / 2) * 100, 0, 100);
 }
 
 /** Convert the LLM rubric into 0-100. Safety flags that are hard-blocks return 0. */
