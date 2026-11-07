@@ -27,8 +27,8 @@ Testing ladder (cheap first; API_BUDGET_USD caps spend, default $2)
   smoke                     2 feeds -> score <= 5 -> render exactly 1 -> verify the public URL plays; no Buffer posts
   pilot [--drafts]          3 distinct Shorts; Buffer DRAFTS only with --drafts (owner still approves)
 
-Dog-content pilot (opt-in, manual, never publishes; AI_VIDEO_BUDGET_USD hard cap, default $25)
-  dog-pilot [--provider gemini|runway|mock] [--model ID] [--ai 4] [--rankings 4] [--controls 2] [--stock live|mock] [--skip-quality]
+Dog-content pilot (opt-in, manual, never publishes). Paid AI generation is PAUSED (AI_VIDEO_BUDGET_USD defaults to 0).
+  dog-pilot [--rankings 3] [--controls 0] [--ai 0] [--provider mock|gemini|runway] [--stock live|mock] [--skip-quality]
   sfx:build [--provider synth|elevenlabs]   create the comedic sound-effects library in assets/sfx
 
 Daily / weekly automation
@@ -89,7 +89,7 @@ async function main() {
     case 'pilot': { const r = await runPilot(cfg, store, { drafts: !!flags.drafts, count: Number(flags.count ?? 3) }); console.log(r.markdown); writeSummary(r.markdown); if (!r.ok) process.exitCode = 1; return; }
     case 'dog-pilot': {
       const provider = (['gemini', 'runway', 'mock'].includes(String(flags.provider)) ? String(flags.provider) : 'mock') as 'gemini' | 'runway' | 'mock';
-      const r = await runDogPilot(cfg, store, { provider, model: flags.model ? String(flags.model) : undefined, ai: Number(flags.ai ?? 4), rankings: Number(flags.rankings ?? 4), controls: Number(flags.controls ?? 2), stock: flags.stock === 'mock' ? 'mock' : 'live', skipQuality: !!flags['skip-quality'] });
+      const r = await runDogPilot(cfg, store, { provider, model: flags.model ? String(flags.model) : undefined, ai: Number(flags.ai ?? 0), rankings: Number(flags.rankings ?? 3), controls: Number(flags.controls ?? 0), stock: flags.stock === 'mock' ? 'mock' : 'live', skipQuality: !!flags['skip-quality'] });
       console.log(r.markdown); writeSummary(r.markdown);
       if (!r.ok) process.exitCode = 1;
       return;

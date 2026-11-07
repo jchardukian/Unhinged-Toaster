@@ -16,7 +16,7 @@ export const CONTENT_CATEGORIES: ContentCategory[] = [
   'wholesome_reactions',
 ];
 
-export type SourcePlatform = 'reddit' | 'youtube' | 'tiktok' | 'pexels' | 'pixabay' | 'internet_archive' | 'manual' | 'licensed_library' | 'ai_generated';
+export type SourcePlatform = 'reddit' | 'youtube' | 'tiktok' | 'pexels' | 'pixabay' | 'internet_archive' | 'manual' | 'licensed_library' | 'ai_generated' | 'wikimedia_commons';
 
 /** What kind of Short a candidate/production/post is, for separate performance tracking. */
 export type ContentFormat = 'general_viral' | 'ai_dog_comedy' | 'real_dog_ranking';

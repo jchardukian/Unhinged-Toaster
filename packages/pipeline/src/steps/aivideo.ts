@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { log, type Config } from '../config.js';
-import { assertOpen, assertVideoBudget, fetchWithTimeout, recordFailure, recordSuccess, StageTimeoutError } from '../guard.js';
+import { assertOpen, assertVideoBudget, fetchWithTimeout, recordFailure, recordSuccess, StageTimeoutError, videoBudget } from '../guard.js';
 import { recordVideoGen } from '../usage.js';
 import { run } from './media.js';
 
@@ -29,6 +29,7 @@ export interface VideoProvider {
 export type ProviderName = 'gemini' | 'runway' | 'mock';
 
 export function makeProvider(cfg: Config, name: ProviderName, modelOverride?: string): VideoProvider {
+  if (name !== 'mock' && videoBudget() <= 0) throw new Error(`paid AI video generation is paused (AI_VIDEO_BUDGET_USD is 0); provider '${name}' not started. The code stays available for a future, explicitly budgeted run.`);
   if (name === 'gemini') return new GeminiProvider(cfg, modelOverride ?? process.env.AI_VIDEO_MODEL_GEMINI ?? 'gemini-omni-1.2-flash');
   if (name === 'runway') return new RunwayProvider(cfg, modelOverride ?? process.env.AI_VIDEO_MODEL_RUNWAY ?? 'kling_4_flash');
   return new MockProvider();

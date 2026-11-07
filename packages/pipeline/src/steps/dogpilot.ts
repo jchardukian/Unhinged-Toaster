@@ -9,7 +9,7 @@ import { generateClip, makeProvider, type ProviderName } from './aivideo.js';
 import { analyzeClip } from './analyze.js';
 import { assessClip, type QualityVerdict } from './dogquality.js';
 import { DOG_PREMISES, variantPrompt } from './dogprompts.js';
-import { discoverPexels, discoverPixabay, DOG_STOCK_QUERIES } from './discover.js';
+import { discoverInternetArchive, discoverPexels, discoverPixabay, discoverWikimediaCommons, DOG_STOCK_QUERIES } from './discover.js';
 import { contactSheet, sheetBase64, sheetPathFor } from './frames.js';
 import { downloadMedia, ffprobe, mediaDuration, run } from './media.js';
 import { runPreflight } from './preflight.js';
@@ -194,12 +194,17 @@ async function licensedDogPool(cfg: Config, store: Store, o: DogPilotOptions, md
   let found: Candidate[] = [];
   if (o.stock === 'mock') found = await mockStock(cfg, 8);
   else {
+    // free, no-key sources first (license metadata is machine-readable on both), then the free-key stock APIs when configured
+    found.push(...await discoverWikimediaCommons(cfg, 30).catch((e) => { md.push(`- wikimedia commons: ${(e as Error).message}`); return []; }));
+    found.push(...(await discoverInternetArchive(cfg, 40, ['dog', 'dogs', 'puppy', 'puppies']).catch((e) => { md.push(`- internet archive: ${(e as Error).message}`); return [] as Candidate[]; })).filter((c) => !/hot ?dog|commercial|advert|\bad\b|intermission|snack bar|trailer/i.test(`${c.title} ${c.description ?? ''}`)));
     if (cfg.pexelsKey) found.push(...await discoverPexels(cfg, 30, DOG_STOCK_QUERIES).catch((e) => { md.push(`- pexels: ${(e as Error).message}`); return []; }));
     if (cfg.pixabayKey) found.push(...await discoverPixabay(cfg, 30, DOG_STOCK_QUERIES).catch((e) => { md.push(`- pixabay: ${(e as Error).message}`); return []; }));
-    if (!cfg.pexelsKey && !cfg.pixabayKey) md.push('- licensed stock: PEXELS_API_KEY / PIXABAY_API_KEY not set (free keys); no real-dog clips can be sourced');
+    if (!cfg.pexelsKey && !cfg.pixabayKey) md.push('- Pexels / Pixabay not configured (free API keys): only the no-key sources (Wikimedia Commons, Internet Archive) were searched');
+    const bySrc = found.reduce<Record<string, number>>((m, c) => { m[c.source_platform] = (m[c.source_platform] ?? 0) + 1; return m; }, {});
+    md.push(`- licensed candidates by source: ${JSON.stringify(bySrc)}`);
   }
-  found = found.filter((c) => c.rights_status === 'cleared' && (c.duration_sec ?? 0) >= 4 && (c.duration_sec ?? 99) <= 60);
-  md.push(`- licensed stock candidates: ${found.length} (Pexels/Pixabay, commercial reuse + modification allowed)`);
+  found = found.filter((c) => c.rights_status === 'cleared' && (c.duration_sec ?? 0) >= 4 && (c.duration_sec ?? 99) <= 90);
+  md.push(`- licensed stock candidates (cleared, 4–90 s): ${found.length}`);
   const weights = await store.weights();
   const pool: { cand: Candidate; path: string; duration: number; peak: number | null }[] = [];
   const cap = Math.max(12, o.rankings * RANKING_MAX_CLIPS * 3);
@@ -215,7 +220,7 @@ async function licensedDogPool(cfg: Config, store: Store, o: DogPilotOptions, md
       if (scored.status !== 'scored' || (scored.final_score ?? 0) < 70) continue;
       const a = await analyzeClip(file);
       pool.push({ cand: scored, path: file, duration: probe.duration, peak: a.peak?.t ?? null });
-    } catch (e) { log.warn(`stock ${c.id}: ${(e as Error).message.slice(0, 120)}`); }
+    } catch (e) { log.warn(`stock ${c.id} (${c.source_platform}): ${(e as Error).message.replace(/https?:\/\/\S+/g, '<url>').slice(0, 160)}`); }
   }
   pool.sort((a, b) => (b.cand.final_score ?? 0) - (a.cand.final_score ?? 0));
   md.push(`- funny licensed clips after vision scoring: ${pool.length} of ${Math.min(found.length, cap)} checked`);

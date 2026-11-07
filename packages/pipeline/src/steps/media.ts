@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { phashFrame, type Candidate } from '@toaster/shared';
 import { log } from '../config.js';
+import { withRetry } from '../retry.js';
 
 const execFileP = promisify(execFile);
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -77,6 +78,16 @@ export async function downloadMedia(c: Candidate, dir: string): Promise<string> 
       if (fs.existsSync(out)) return out; // generated straight into the job folder by steps/aivideo.ts
       throw new Error('ai_generated clip file missing (generation output was not kept)');
     }
+    case 'wikimedia_commons':
+      if (!c.media_url) throw new Error('no media_url');
+      // upload.wikimedia.org rate-limits shared IPs with 429; back off and retry a few times before giving up
+      await withRetry(`commons download ${c.id}`, async () => {
+        const res = await fetch(c.media_url!, { headers: { 'user-agent': 'UnhingedToasterBot/0.1 (https://github.com/jchardukian/Unhinged-Toaster; theunhingedtoaster@gmail.com)' }, redirect: 'follow' });
+        if (res.status === 429 || res.status >= 500) throw new Error(`commons ${res.status}`);
+        if (!res.ok) throw new Error(`commons download ${res.status}`);
+        fs.writeFileSync(out, Buffer.from(await res.arrayBuffer()));
+      }, { attempts: 3, baseMs: 15000, shouldRetry: (e) => /commons (429|5\d\d)/.test(e.message) });
+      return out;
     default:
       if (!c.media_url) throw new Error('no media_url');
       if (c.media_url.startsWith('file://')) { fs.copyFileSync(c.media_url.slice(7), out); return out; }

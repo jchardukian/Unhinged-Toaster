@@ -29,6 +29,7 @@ export async function discoverAll(cfg: Config, opts: DiscoverOptions): Promise<C
         : s === 'tiktok' ? await discoverTikTok(cfg, opts.limitPerSource)
         : s === 'youtube_search' ? await discoverYouTubeSearch(cfg, opts.limitPerSource)
         : s === 'youtube_viral' ? await discoverYouTubeViral(cfg, opts.limitPerSource)
+        : s === 'wikimedia_commons' ? await discoverWikimediaCommons(cfg, opts.limitPerSource)
         : [];
       log.info(`discover:${s} -> ${found.length} candidates`);
       out.push(...found);
@@ -122,10 +123,9 @@ export async function discoverPexels(cfg: Config, limit: number, queries: { q: s
 // ---------------------------------------------------------------- Internet Archive (public domain / CC0 / CC BY items; short items only)
 interface IaDoc { identifier: string; title?: string; licenseurl?: string | string[]; downloads?: number; runtime?: string; creator?: string | string[]; description?: string | string[]; date?: string }
 
-export async function discoverInternetArchive(_cfg: Config, limit: number): Promise<Candidate[]> {
+export async function discoverInternetArchive(_cfg: Config, limit: number, subjects = ['funny', 'comedy', 'cats', 'dogs', 'animals', 'fail', 'blooper', 'slapstick']): Promise<Candidate[]> {
   const now = new Date().toISOString();
   const out: Candidate[] = [];
-  const subjects = ['funny', 'comedy', 'cats', 'dogs', 'animals', 'fail', 'blooper', 'slapstick'];
   const q = `mediatype:movies AND (licenseurl:(*publicdomain*) OR licenseurl:(*zero*) OR licenseurl:(*licenses\\/by\\/*)) AND (subject:(${subjects.join(' OR ')}) OR title:(${subjects.join(' OR ')}))`;
   const sp = new URLSearchParams({ q, rows: String(Math.min(200, limit * 3)), output: 'json', sort: 'downloads desc' });
   for (const f of ['identifier', 'title', 'licenseurl', 'downloads', 'runtime', 'creator', 'description', 'date']) sp.append('fl[]', f);
@@ -726,3 +726,51 @@ export const DOG_STOCK_QUERIES: { q: string; category: ContentCategory }[] = [
   { q: 'dog running into', category: 'funny_animals' }, { q: 'dog confused', category: 'funny_animals' }, { q: 'dog costume', category: 'funny_animals' },
   { q: 'dog steals food', category: 'funny_animals' }, { q: 'dog bath', category: 'funny_animals' }, { q: 'dog snow', category: 'funny_animals' },
 ];
+
+// ---------------------------------------------------------------- Wikimedia Commons (no key; CC0 / public domain / CC BY videos with machine-readable license metadata)
+export const COMMONS_UA = 'UnhingedToasterBot/0.1 (https://github.com/jchardukian/Unhinged-Toaster; theunhingedtoaster@gmail.com)';
+export const COMMONS_DOG_QUERIES = ['dog funny', 'dog playing', 'puppy', 'dog jumping', 'dog running', 'dog swimming', 'dog snow', 'dog toy'];
+
+interface CommonsPage { title: string; pageid: number; imageinfo?: { url: string; descriptionurl?: string; mime?: string; width?: number; height?: number; duration?: number; extmetadata?: Record<string, { value: string }> }[] }
+
+/** Pure: turn a Commons API page into a candidate (or null when the license is not CC0 / PD / CC BY, or the file is not a usable video). */
+export function commonsCandidate(p: CommonsPage, now: string): Candidate | null {
+  const ii = p.imageinfo?.[0];
+  if (!ii || !/^video\//.test(ii.mime ?? '')) return null;
+  const em = ii.extmetadata ?? {};
+  const license = em.LicenseShortName?.value ?? '';
+  const artist = (em.Artist?.value ?? '').replace(/<[^>]+>/g, '').trim() || null;
+  const dur = Number(ii.duration ?? 0);
+  if (!dur || dur < 4 || dur > 90) return null;
+  const rights = initialRights('wikimedia_commons', { license, evidenceSuffix: ii.descriptionurl ?? `https://commons.wikimedia.org/wiki/${encodeURIComponent(p.title)}` });
+  if (rights.rights_status !== 'cleared') return null;
+  const title = p.title.replace(/^File:/, '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
+  return {
+    id: ulid(), discovered_at: now, updated_at: now, status: 'discovered', status_reason: null, heuristic_score: null, llm_score: null, final_score: null, llm_rationale: null, safety_flags: null,
+    phash: null, duplicate_of: null, attribution_text: null, category: 'funny_animals', source_platform: 'wikimedia_commons', copyright_risk: null, copyright_risk_reasons: null,
+    source_id: String(p.pageid), source_url: ii.descriptionurl ?? `https://commons.wikimedia.org/wiki/${encodeURIComponent(p.title)}`, media_url: ii.url, author: artist, author_url: null,
+    title, description: (em.ImageDescription?.value ?? '').replace(/<[^>]+>/g, '').slice(0, 300) || null, duration_sec: dur, width: ii.width ?? null, height: ii.height ?? null,
+    published_at: null, views: null, likes: null, comments: null, shares: null, engagement_velocity: null, ...rights,
+  } as Candidate;
+}
+
+export async function discoverWikimediaCommons(_cfg: Config, limit: number, queries: string[] = COMMONS_DOG_QUERIES): Promise<Candidate[]> {
+  const now = new Date().toISOString();
+  const out: Candidate[] = [];
+  for (const q of queries) {
+    const sp = new URLSearchParams({ action: 'query', format: 'json', generator: 'search', gsrsearch: `filetype:video ${q}`, gsrnamespace: '6', gsrlimit: String(Math.min(50, limit)), prop: 'imageinfo', iiprop: 'url|size|extmetadata|mime', iiextmetadatafilter: 'LicenseShortName|Artist|LicenseUrl|ImageDescription' });
+    let res: Response;
+    try {
+      res = await withRetry(`commons ${q}`, async () => {
+        const r = await fetch(`https://commons.wikimedia.org/w/api.php?${sp}`, { headers: { 'user-agent': COMMONS_UA, accept: 'application/json' }, redirect: 'follow' });
+        if (r.status === 429 || r.status >= 500) throw new Error(`commons ${r.status}`);
+        return r;
+      }, { attempts: 3, baseMs: 10000 });
+    } catch (e) { log.warn(`commons "${q}": ${(e as Error).message} (Wikimedia rate-limits shared IPs; skipped)`); continue; }
+    if (!res.ok) { log.warn(`commons "${q}" -> ${res.status}`); continue; }
+    const j = (await res.json()) as { query?: { pages?: Record<string, CommonsPage> } };
+    for (const p of Object.values(j.query?.pages ?? {})) { const c = commonsCandidate(p, now); if (c) out.push(c); }
+    await sleep(2000);
+  }
+  return dedupeById(out);
+}

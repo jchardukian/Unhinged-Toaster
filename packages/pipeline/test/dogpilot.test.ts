@@ -7,7 +7,8 @@ import { execFileSync } from 'node:child_process';
 import { creditText, initialRights } from '@toaster/shared';
 import { assertVideoBudget, setVideoBudget, VideoBudgetExceededError } from '../src/guard.js';
 import { currentUsage, recordVideoGen, recordVideoOutcome, costOf } from '../src/usage.js';
-import { findGeminiVideo, GeminiProvider, MockProvider, RunwayProvider } from '../src/steps/aivideo.js';
+import { findGeminiVideo, GeminiProvider, makeProvider, MockProvider, RunwayProvider } from '../src/steps/aivideo.js';
+import { commonsCandidate } from '../src/steps/discover.js';
 import { buildPrompt, DOG_PREMISES } from '../src/steps/dogprompts.js';
 import { judge, QUALITY_BAR } from '../src/steps/dogquality.js';
 import { segmentSeconds, RANKING_MAX_SEC } from '../src/steps/ranking.js';
@@ -108,4 +109,27 @@ test('sfx: placeholders stay in the work dir and cues land on real beats of the 
   assert.equal(planSfx(c, { freeze: null, punchIn: null, replay: null, sticker: null, muteSource: false } as never, (t) => t).length, 0, 'no beats, no effects');
   delete process.env.SFX_PROVIDER;
   assert.equal(planSfx(c, { freeze: { at: 1, duration: 0.7, text: 'X' }, punchIn: null, replay: null, sticker: null, muteSource: false } as never, (t) => t).length, 0, 'without SFX_PROVIDER=synth the placeholders are ignored');
+});
+
+test('paid AI generation is paused by default: a paid provider refuses to start at a $0 cap; mock still works', () => {
+  setVideoBudget(0);
+  assert.throws(() => makeProvider(cfg, 'gemini'), /paused/);
+  assert.throws(() => makeProvider(cfg, 'runway'), /paused/);
+  assert.doesNotThrow(() => makeProvider(cfg, 'mock'));
+  setVideoBudget(1000);
+});
+
+test('Wikimedia Commons: only CC0 / public domain / CC BY videos become cleared candidates; SA/NC/ND and non-video are skipped', () => {
+  const now = '2026-11-07T00:00:00Z';
+  const page = (license: string, mime = 'video/webm', duration = 12) => ({ title: 'File:Dog_jumps_into_leaves.webm', pageid: 42, imageinfo: [{ url: 'https://upload.wikimedia.org/x/Dog_jumps_into_leaves.webm', descriptionurl: 'https://commons.wikimedia.org/wiki/File:Dog_jumps_into_leaves.webm', mime, width: 1280, height: 720, duration, extmetadata: { LicenseShortName: { value: license }, Artist: { value: '<a href="x">Jane Doe</a>' }, ImageDescription: { value: 'A dog <b>jumps</b>' } } }] });
+  const by = commonsCandidate(page('CC BY 4.0'), now)!;
+  assert.equal(by.rights_status, 'cleared'); assert.equal(by.rights_basis, 'cc_by'); assert.equal(by.author, 'Jane Doe'); assert.equal(by.source_platform, 'wikimedia_commons'); assert.equal(by.title, 'Dog jumps into leaves'); assert.equal(by.duration_sec, 12);
+  assert.equal(commonsCandidate(page('CC0'), now)!.rights_basis, 'cc0');
+  assert.equal(commonsCandidate(page('Public domain'), now)!.rights_basis, 'public_domain');
+  assert.equal(commonsCandidate(page('CC BY-SA 4.0'), now), null, 'share-alike is not used');
+  assert.equal(commonsCandidate(page('CC BY-NC 2.0'), now), null);
+  assert.equal(commonsCandidate(page('CC BY 4.0', 'image/jpeg'), now), null, 'not a video');
+  assert.equal(commonsCandidate(page('CC BY 4.0', 'video/webm', 200), now), null, 'too long');
+  const credit = creditText({ author: 'Jane Doe', source_url: by.source_url, rights_basis: 'cc_by', source_platform: 'wikimedia_commons' });
+  assert.match(credit, /Jane Doe/); assert.match(credit, /Creative Commons Attribution/);
 });

@@ -1,6 +1,6 @@
 # Funny-dog expansion: findings and pilot design (2026-11-07)
 
-Status (2026-11-07): **pilot implemented** (opt-in `dog-pilot` command + "Dog pilot" workflow), exercised end to end with
+Status (2026-11-07, later): **paid AI generation PAUSED by owner decision** (AI_VIDEO_BUDGET_USD defaults to 0; a paid provider refuses to start; the code stays for a future explicitly budgeted run). The pilot is now **free real-dog rankings from licensed footage**: Wikimedia Commons (CC0 / PD / CC BY, no key) + Internet Archive (no key) + Pexels / Pixabay when their free keys exist. Earlier status: **pilot implemented** (opt-in `dog-pilot` command + "Dog pilot" workflow), exercised end to end with
 the free mock provider and mock stock; no provider account, no paid generation, no dog content published, production
 schedules untouched. Owner credentials needed before paid runs are listed at the end of docs/DEPLOYMENT.md.
 

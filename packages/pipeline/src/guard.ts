@@ -37,10 +37,11 @@ export function assertBudget(label: string): void {
 }
 
 /**
- * AI video generation has its own HARD cap (AI_VIDEO_BUDGET_USD, default $25). It is checked with the cost of the
+ * AI video generation has its own HARD cap (AI_VIDEO_BUDGET_USD, default $0 = paused). It is checked with the cost of the
  * NEXT attempt included, is never raised by code, and exhausting it ends the pilot with a report, not a retry.
  */
-let videoBudgetUsd = Number(process.env.AI_VIDEO_BUDGET_USD) > 0 ? Number(process.env.AI_VIDEO_BUDGET_USD) : 25;
+// Paid AI video generation is PAUSED: the cap defaults to $0, so no paid provider can run unless AI_VIDEO_BUDGET_USD is set on purpose.
+let videoBudgetUsd = Number(process.env.AI_VIDEO_BUDGET_USD) > 0 ? Number(process.env.AI_VIDEO_BUDGET_USD) : 0;
 export function videoBudget(): number { return videoBudgetUsd; }
 export function setVideoBudget(usd: number): void { videoBudgetUsd = usd; }
 export class VideoBudgetExceededError extends Error {

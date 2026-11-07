@@ -88,9 +88,10 @@ repository variable to change it) and reported at the end of every run together 
 
 ## Dog-content pilot (opt-in, manual, never publishes)
 
-GitHub → Actions → "Dog pilot (opt-in, never publishes)" → Run workflow. Inputs: `provider` (mock = free synthetic
-clips; gemini / runway need a key), `ai_count`, `ranking_count`, `controls`, `ai_video_budget` (HARD cap, default $25,
-never raised by code), `stock` (live = Pexels/Pixabay keys; mock = synthetic). The run writes `dog-pilot-report.md`
+Paid AI generation is paused (owner decision): `ai_count` and `ai_video_budget` default to 0 and a paid provider refuses
+to start at $0. GitHub → Actions → "Dog pilot (opt-in, never publishes)" → Run workflow with `ranking_count=3`: three
+real-dog ranking compilations from licensed footage (Wikimedia Commons CC0/PD/CC BY and Internet Archive need no key;
+Pexels / Pixabay are added when their free keys exist). The run writes `dog-pilot-report.md`
 (per video: format, attempts, rejections, cost per accepted video, quality scores, rights) plus a contact sheet and the
 finished mp4s as artifacts. It creates no Buffer posts; the general daily/weekly schedules are untouched.
 Rankings use licensed stock only; when fewer than 3 funny licensed clips exist the shortage is reported, not filled.

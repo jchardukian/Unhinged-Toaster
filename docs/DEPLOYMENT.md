@@ -101,7 +101,7 @@ API $0.039 per Short → about $1/week, $4–8/month including daily discovery; 
 15–45 min per daily run (free for a public repository; 2 000 free minutes/month for a private one); R2 ≈ 0.7 GB/week
 (10 GB free); Cloudflare Workers/D1 free tier; Buffer existing plan; Reddit free.
 
-## Dog pilot credentials (only when you want paid generation or live stock)
+## Dog pilot credentials (paid AI generation is PAUSED; only the free stock keys matter now)
 
 | Secret | Needed for | Where |
 |---|---|---|
@@ -110,5 +110,6 @@ API $0.039 per Short → about $1/week, $4–8/month including daily discovery; 
 | `PEXELS_API_KEY`, `PIXABAY_API_KEY` | real-dog rankings from licensed stock | pexels.com/api and pixabay.com/api (free, instant) |
 | variable `SFX_PROVIDER=elevenlabs` | build the real sound-effects library once with the ElevenLabs key already in use | Settings → Variables |
 
-One AI provider key is enough to start: the workflow's `provider` input selects it. Nothing here is required for the
-existing general-viral production.
+AI keys are NOT needed while generation is paused (the workflow's ai_count and ai_video_budget default to 0). For the
+free real-dog pilot the two stock keys are optional but recommended: without them only Wikimedia Commons and the
+Internet Archive (no key) are searched. Nothing here is required for the existing general-viral production.

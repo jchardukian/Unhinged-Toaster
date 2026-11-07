@@ -83,9 +83,9 @@ export function creditText(c: Pick<Candidate, 'author' | 'source_url' | 'rights_
   ];
   switch (c.rights_basis) {
     case 'cc_by': lines.push('📜 Original footage used under Creative Commons Attribution (CC BY).'); break;
-    case 'cc0': case 'public_domain': lines.push('📜 Original footage is public domain.'); break;
     case 'pexels_license': lines.push('📜 Original footage via Pexels (Pexels License).'); break;
     case 'pixabay_license': lines.push('📜 Original footage via Pixabay (Content License).'); break;
+    case 'cc0': case 'public_domain': if (c.source_platform === 'wikimedia_commons') { lines.push('📜 Original footage via Wikimedia Commons (public domain / CC0).'); break; } lines.push('📜 Original footage is public domain.'); break;
     case 'written_permission': lines.push('📜 Original footage used with the creator\'s permission.'); break;
     case 'licensed': lines.push('📜 Original footage licensed.'); break;
     default: break; // no basis claim of any kind for review-path footage
@@ -174,6 +174,12 @@ export function initialRights(platform: SourcePlatform, meta: RightsMeta): Pick<
       return { rights_status: 'cleared', rights_basis: 'pexels_license', rights_evidence: 'https://www.pexels.com/license/', rights_notes: 'Attribution appreciated, not required.' };
     case 'pixabay':
       return { rights_status: 'cleared', rights_basis: 'pixabay_license', rights_evidence: `https://pixabay.com/service/license-summary/${meta.evidenceSuffix ?? ''}`, rights_notes: 'Pixabay Content License: commercial use OK, no attribution required, must be transformed (we add template/captions/commentary); no unmodified redistribution.' };
+    case 'wikimedia_commons': {
+      const lic = (meta.license ?? '').toLowerCase();
+      if (/cc0|public domain|pd-/.test(lic)) return { rights_status: 'cleared', rights_basis: lic.includes('cc0') ? 'cc0' : 'public_domain', rights_evidence: `${meta.evidenceSuffix ?? ''} license=${meta.license}`, rights_notes: 'Wikimedia Commons file; license from the file page metadata.' };
+      if (/^cc by(?: \d|$|-\d)/.test(lic) && !/-sa|-nc|-nd/.test(lic)) return { rights_status: 'cleared', rights_basis: 'cc_by', rights_evidence: `${meta.evidenceSuffix ?? ''} license=${meta.license}`, rights_notes: 'Attribution required (author + license + link printed in the description).' };
+      return { rights_status: 'unknown', rights_basis: null, rights_evidence: `${meta.evidenceSuffix ?? ''} license=${meta.license ?? 'none'}`, rights_notes: 'Share-alike / non-commercial / no-derivatives or unlisted license: not used.' };
+    }
     case 'licensed_library':
       return { rights_status: 'cleared', rights_basis: 'licensed', rights_evidence: meta.license ?? 'license id missing', rights_notes: null };
     case 'ai_generated':

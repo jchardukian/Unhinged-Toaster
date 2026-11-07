@@ -1,8 +1,9 @@
 name: Dog pilot (opt-in, never publishes)
 
 # Separate, manual workflow for the dog-content pilot. It does NOT touch the daily/weekly schedules and creates no
-# Buffer posts. AI generation is metered against a HARD cap (ai_video_budget, default $25; never raised by code).
-# provider=mock renders free synthetic clips so the whole path can be exercised without any provider key.
+# Buffer posts. Paid AI generation is PAUSED: ai_count defaults to 0 and ai_video_budget to 0 (a paid provider refuses
+# to start at $0). The pilot is real-dog rankings from licensed footage: Wikimedia Commons + Internet Archive need no
+# key; Pexels / Pixabay need free keys.
 on:
   workflow_dispatch:
     inputs:
@@ -16,18 +17,18 @@ on:
         default: ''
       ai_count:
         description: 'Realistic AI dog comedy Shorts to accept'
-        default: '4'
+        default: '0'
       ranking_count:
-        description: 'Real-dog rankings from LICENSED stock (PEXELS_API_KEY / PIXABAY_API_KEY)'
-        default: '4'
+        description: 'Real-dog rankings from LICENSED footage (Commons + Internet Archive; plus Pexels/Pixabay when their free keys exist)'
+        default: '3'
       controls:
         description: 'General viral control Shorts from the existing engine'
-        default: '2'
+        default: '0'
       ai_video_budget:
-        description: 'HARD cap in USD for AI generation this run'
-        default: '25'
+        description: 'HARD cap in USD for AI generation this run (0 = paused, the default)'
+        default: '0'
       stock:
-        description: 'live = Pexels/Pixabay (keys required); mock = free synthetic clips'
+        description: 'live = Wikimedia Commons + Internet Archive (no key) plus Pexels/Pixabay when their free keys exist; mock = synthetic clips'
         type: choice
         options: [live, mock]
         default: live
@@ -57,7 +58,7 @@ jobs:
         timeout-minutes: 75
         env:
           AI_VIDEO_BUDGET_USD: ${{ inputs.ai_video_budget }}
-          API_BUDGET_USD: ${{ vars.API_BUDGET_USD || '5' }}
+          API_BUDGET_USD: ${{ vars.API_BUDGET_USD || '2' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           RUNWAY_API_KEY: ${{ secrets.RUNWAY_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
