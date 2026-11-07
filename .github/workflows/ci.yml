@@ -122,12 +122,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: pip install -q "yt-dlp[default]" && yt-dlp --version
+      - run: pip install -q "yt-dlp[default]" bgutil-ytdlp-pot-provider && yt-dlp --version
+      - name: build the proof-of-origin token helper (free, account-less; yt-dlp's documented remedy for datacenter IPs)
+        run: git clone -q --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git bgutil && cd bgutil/server && npm ci --silent && npx tsc && ls build/generate_once.js
       - name: fetch per client
         run: |
-          for client in web_embedded mweb default; do
+          POT="--extractor-args youtubepot-bgutilscript:script_path=$PWD/bgutil/server/build/generate_once.js"
+          for client in web_embedded mweb web default; do
             for id in Xm2dOTnqtYQ y4MGfBLc0mM; do
-              args=(--no-warnings --js-runtimes "node:$(which node)" -f "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b" --merge-output-format mp4 -o "out_${client}_${id}.mp4")
+              args=(--no-warnings --js-runtimes "node:$(which node)" $POT -f "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b" --merge-output-format mp4 -o "out_${client}_${id}.mp4")
               if [ "$client" != default ]; then args+=(--extractor-args "youtube:player_client=$client"); fi
               if timeout 240 yt-dlp "${args[@]}" "https://www.youtube.com/watch?v=$id" > "log_${client}_${id}.txt" 2>&1 && [ -s "out_${client}_${id}.mp4" ]; then
                 echo "FETCH $client $id OK $(stat -c %s "out_${client}_${id}.mp4") bytes"

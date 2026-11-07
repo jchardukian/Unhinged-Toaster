@@ -138,7 +138,7 @@ async function main() {
       return;
     }
     case 'publish': {
-      const r = await publishWeek(cfg, store, { dryRun: !!flags['dry-run'] });
+      const r = await publishWithAutopilot(cfg, store, { dryRun: !!flags['dry-run'] });
       log.info(`weeks ${r.weeks.join(',')}: created ${r.created}, adopted ${r.adopted}, failed ${r.failed}, open slots left ${r.openSlots}`);
       return;
     }
@@ -274,11 +274,11 @@ async function main() {
 }
 
 /** Drafts by default; schedules without approval only when the autopilot gate is active (switch + phrase + no stop + no pause). */
-async function publishWithAutopilot(cfg: Config, store: Store): Promise<{ created: number; adopted: number; failed: number; openSlots: number }> {
+async function publishWithAutopilot(cfg: Config, store: Store, opts: { dryRun?: boolean } = {}): Promise<{ created: number; adopted: number; failed: number; openSlots: number; weeks: string[] }> {
   const v = await autopilotStatus(cfg, store);
   writeSummary(autopilotMarkdown(v, cfg));
-  if (!v.active) return publishWeek(cfg, store);
-  return publishWeek(cfg, store, { unattended: { active: true, minQc: cfg.unattendedMinQc, reviewDrafts: cfg.unattendedReviewDrafts, decide: (d) => logDecision(store, d) } });
+  if (!v.active) return publishWeek(cfg, store, { dryRun: opts.dryRun });
+  return publishWeek(cfg, store, { dryRun: opts.dryRun, unattended: { active: true, minQc: cfg.unattendedMinQc, reviewDrafts: cfg.unattendedReviewDrafts, decide: (d) => logDecision(store, d) } });
 }
 
 async function discoverInto(cfg: Config, store: Store, sources: SourceAdapter[], limit: number): Promise<number> {
