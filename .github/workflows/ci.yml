@@ -111,6 +111,36 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+  # YouTube media fetch from a real GitHub-runner IP, per player client, with the Node JS runtime. Runs when the push's
+  # commit message contains [fetchprobe]. Two public Shorts; result lines "FETCH <client> OK/FAIL" in the log.
+  youtube-fetch-probe:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[fetchprobe]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pip install -q "yt-dlp[default]" && yt-dlp --version
+      - name: fetch per client
+        run: |
+          for client in web_embedded mweb default; do
+            for id in Xm2dOTnqtYQ y4MGfBLc0mM; do
+              args=(--no-warnings --js-runtimes "node:$(which node)" -f "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b" --merge-output-format mp4 -o "out_${client}_${id}.mp4")
+              if [ "$client" != default ]; then args+=(--extractor-args "youtube:player_client=$client"); fi
+              if timeout 240 yt-dlp "${args[@]}" "https://www.youtube.com/watch?v=$id" > "log_${client}_${id}.txt" 2>&1 && [ -s "out_${client}_${id}.mp4" ]; then
+                echo "FETCH $client $id OK $(stat -c %s "out_${client}_${id}.mp4") bytes"
+              else
+                echo "FETCH $client $id FAIL: $(tail -n 2 "log_${client}_${id}.txt" | tr '\n' ' ' | cut -c1-300)"
+              fi
+            done
+          done
+      - name: tiktok creator page
+        run: |
+          timeout 120 yt-dlp --no-warnings --flat-playlist --playlist-end 3 -J "https://www.tiktok.com/@tuckerbudzyn" > tt.json 2> tt.err || true
+          echo "TIKTOK rows: $(python3 -c "import json;d=json.load(open('tt.json'));print(len([e for e in d.get('entries',[]) if e]))" 2>/dev/null || echo 0) ; stderr: $(tail -n 2 tt.err | cut -c1-300)"
+
   # Viral funny-dog discovery from a real GitHub-runner IP (the "Dog shortlist" workflow is only dispatchable once it is
   # on main). Runs when the push's commit message contains [dogprobe]. Discovery only: no store, no drafts, ~$0.10.
   dog-shortlist-probe:
