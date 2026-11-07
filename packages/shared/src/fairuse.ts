@@ -33,6 +33,8 @@ export interface FairUseInputs {
   editedSeconds: number;
   transcriptChars: number;
   now?: string;
+  /** owner policy: highest model-rated copyright risk still counted in favour for "nature of source" (default low) */
+  maxRisk?: 'low' | 'medium';
 }
 
 const UGC_PLATFORMS = new Set(['reddit', 'tiktok', 'youtube']);
@@ -48,6 +50,7 @@ export function assessFairUse(i: FairUseInputs): FairUseAssessment {
   if (bc.high || c.copyright_risk === 'high') f.push({ name: 'nature_of_source', state: 'against', detail: bc.high ? `broadcast/professional footage: ${bc.reasons.slice(0, 2).join(', ')}` : `copyright risk rated high: ${reasons.slice(0, 2).join('; ') || 'see candidate'}` });
   else if (!UGC_PLATFORMS.has(c.source_platform)) f.push({ name: 'nature_of_source', state: 'uncertain', detail: `source platform ${c.source_platform} is not a user-generated-content feed` });
   else if (c.copyright_risk === 'low') f.push({ name: 'nature_of_source', state: 'for', detail: 'user-filmed amateur footage on a UGC platform; copyright risk rated low' });
+  else if (c.copyright_risk === 'medium' && i.maxRisk === 'medium') f.push({ name: 'nature_of_source', state: 'for', detail: `amateur UGC footage; copyright risk rated medium (${reasons.slice(0, 2).join('; ') || 'poster may not be the filmer'}) and accepted by the owner policy UNATTENDED_FAIR_USE_MAX_RISK=medium` });
   else f.push({ name: 'nature_of_source', state: 'uncertain', detail: `copyright risk ${c.copyright_risk ?? 'not rated'}: ${reasons.slice(0, 2).join('; ') || 'poster may not be the filmer'}` });
 
   // 2. provenance: a watermark from another platform means the poster is probably not the creator

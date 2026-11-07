@@ -85,6 +85,8 @@ export interface Config {
   unattendedReviewDrafts: boolean;
   /** owner policy: schedule productions whose fair-use assessment is "supportable" (uncertain ones are never scheduled) */
   unattendedFairUse: boolean;
+  /** owner policy: model-rated copyright risk still accepted for a supportable fair-use verdict ('low' default | 'medium') */
+  fairUseMaxRisk: 'low' | 'medium';
   workDir: string;
   assetsDir: string;
   templateDir: string;
@@ -144,6 +146,7 @@ export function loadConfig(): Config {
     unattendedMinQc: Number(e.UNATTENDED_MIN_QC) > 0 ? Number(e.UNATTENDED_MIN_QC) : 7,
     unattendedReviewDrafts: e.UNATTENDED_REVIEW_DRAFTS === 'true',
     unattendedFairUse: e.UNATTENDED_FAIR_USE === 'true',
+    fairUseMaxRisk: e.UNATTENDED_FAIR_USE_MAX_RISK === 'medium' ? 'medium' : 'low',
     workDir: path.resolve(root, e.WORK_DIR ?? 'work'),
     assetsDir: path.join(root, 'assets'),
     templateDir: path.join(root, 'template'),

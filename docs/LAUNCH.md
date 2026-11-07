@@ -17,6 +17,10 @@ fair-use assessment → Buffer post → monitor. Nothing is manual after the one
   risk / unmuted music / mocking private people. This is an assessment, not a licence and not legal advice; it is
   stored on the production and copied into every scheduling decision.
 - Unattended scheduling uses `supportable` assessments ONLY when the owner sets `UNATTENDED_FAIR_USE=true`.
+  Measured on the three launch samples (Reddit reposts): the model rates most Reddit sources "medium" ("poster may not
+  be the filmer"), which makes them `uncertain` under the default. `UNATTENDED_FAIR_USE_MAX_RISK=medium` tells the
+  assessment to count medium-rated risk in favour (high stays against, foreign watermarks and compilations stay
+  uncertain). Without it, expect most Reddit videos to be held for your approval rather than scheduled.
   `uncertain` videos are never scheduled unattended; with `UNATTENDED_REVIEW_DRAFTS=true` they become Buffer drafts for
   optional owner approval, otherwise they are skipped and logged.
 

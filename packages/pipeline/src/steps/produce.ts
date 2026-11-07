@@ -184,7 +184,7 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     const fairUse = basis === 'cleared' ? null : assessFairUse({
       candidate: c, commentary: copy.commentary, commentaryMode, headline: copy.headline,
       edits: { freeze: !!timeline.beats.freeze, punchIn: !!timeline.beats.punchIn, replay: !!timeline.beats.replay, captions: (transcript?.words.length ?? 0) >= 6, muteSource },
-      editedSeconds: r.editedClipSec, transcriptChars: transcript?.text.length ?? 0,
+      editedSeconds: r.editedClipSec, transcriptChars: transcript?.text.length ?? 0, maxRisk: cfg.fairUseMaxRisk,
     });
     if (fairUse) log.info(`fair-use assessment ${c.id}: ${fairUse.verdict} (${fairUse.factors.filter((f) => f.state !== 'for').map((f) => `${f.name}:${f.state}`).join(', ') || 'all factors for'})`);
     const prod: Production = {
