@@ -63,7 +63,7 @@ discovery-only on GitHub runners), discovery `reddit_rss` + Internet Archive fil
 Not used and not approved: `YTDLP_COOKIES_B64`, `YTDLP_ASSUME_FETCHABLE`, self-hosted runners.
 Optional (Actions **variables**, not secrets): `ELEVENLABS_VOICE_ID`, `BUFFER_TAG_REVIEW_ID` / `BUFFER_TAG_CLEARED_ID`,
 `REDDIT_*` app credentials (real vote counts, no feed rate limits), `YOUTUBE_API_KEY` (as a secret), `ALERT_WEBHOOK_URL`,
-`TIKTOK_ACCOUNTS` (comma-separated original-creator handles, no @: the only TikTok discovery that works from a server;
+`UNATTENDED_PUBLISHING` + `UNATTENDED_AUTHORIZATION` (unattended publishing, docs/AUTONOMY.md; off until both are set), `EMERGENCY_STOP`, `UNATTENDED_MIN_QC`, `QC_ENFORCE`, `TIKTOK_ACCOUNTS` (comma-separated original-creator handles, no @: the only TikTok discovery that works from a server;
 exact view counts, 1M+ ranked first), `SFX_PROVIDER=elevenlabs` (build the comedic sound-effect library once; until then
 renders have no SFX).
 

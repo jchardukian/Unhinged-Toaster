@@ -83,6 +83,14 @@ jobs:
           COMMENTARY_DEFAULT: ${{ vars.COMMENTARY_DEFAULT }}
           BUFFER_TIMEZONE: ${{ vars.BUFFER_TIMEZONE || 'America/Chicago' }}
           PUBLISH_SLOTS: ${{ vars.PUBLISH_SLOTS || '11:00,15:00,19:00' }}
+          # unattended publishing: OFF unless both variables are set (docs/AUTONOMY.md); EMERGENCY_STOP=true halts it
+          UNATTENDED_PUBLISHING: ${{ vars.UNATTENDED_PUBLISHING }}
+          UNATTENDED_AUTHORIZATION: ${{ vars.UNATTENDED_AUTHORIZATION }}
+          UNATTENDED_MIN_QC: ${{ vars.UNATTENDED_MIN_QC }}
+          UNATTENDED_REVIEW_DRAFTS: ${{ vars.UNATTENDED_REVIEW_DRAFTS }}
+          EMERGENCY_STOP: ${{ vars.EMERGENCY_STOP }}
+          QC_ENFORCE: ${{ vars.QC_ENFORCE }}
+          SFX_PROVIDER: ${{ vars.SFX_PROVIDER }}
         run: node packages/pipeline/dist/cli.js run-daily --stock ${{ inputs.stock || '10' }}
       - uses: actions/upload-artifact@v4
         if: always()

@@ -76,6 +76,13 @@ export interface Config {
   r2: { accountId?: string; accessKeyId?: string; secretAccessKey?: string; bucket: string; publicBaseUrl?: string };
   apiUrl: string | undefined;
   apiToken: string | undefined;
+  /** Unattended publishing (autopilot): off unless UNATTENDED_PUBLISHING=true AND the owner's exact phrase is set. */
+  unattended: boolean;
+  unattendedAuthorization: string | undefined;
+  emergencyStop: boolean;
+  unattendedMinQc: number;
+  /** keep drafting transformation-review videos for optional owner approval while autopilot runs (default false) */
+  unattendedReviewDrafts: boolean;
   workDir: string;
   assetsDir: string;
   templateDir: string;
@@ -129,6 +136,11 @@ export function loadConfig(): Config {
     r2: { accountId: e.R2_ACCOUNT_ID, accessKeyId: e.R2_ACCESS_KEY_ID, secretAccessKey: e.R2_SECRET_ACCESS_KEY, bucket: e.R2_BUCKET ?? 'toaster-media', publicBaseUrl: e.R2_PUBLIC_BASE_URL },
     apiUrl: e.TOASTER_API_URL || deployedWorkerUrl(root),
     apiToken: e.TOASTER_API_TOKEN,
+    unattended: e.UNATTENDED_PUBLISHING === 'true',
+    unattendedAuthorization: e.UNATTENDED_AUTHORIZATION,
+    emergencyStop: e.EMERGENCY_STOP === 'true',
+    unattendedMinQc: Number(e.UNATTENDED_MIN_QC) > 0 ? Number(e.UNATTENDED_MIN_QC) : 7,
+    unattendedReviewDrafts: e.UNATTENDED_REVIEW_DRAFTS === 'true',
     workDir: path.resolve(root, e.WORK_DIR ?? 'work'),
     assetsDir: path.join(root, 'assets'),
     templateDir: path.join(root, 'template'),

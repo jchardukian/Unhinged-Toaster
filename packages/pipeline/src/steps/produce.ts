@@ -9,6 +9,7 @@ import { transcribe } from './captions.js';
 import { writeCopy } from './copy.js';
 import { downloadMedia, extractAudio, ffprobe, mediaDuration, videoPhash } from './media.js';
 import { loadTemplate, pickMusic, renderShort } from './render.js';
+import { qualityControl } from './qc.js';
 import { scoreCandidate } from './score.js';
 import { planSfx } from './sfx.js';
 import { synthesiseCommentary } from './tts.js';
@@ -156,12 +157,28 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     recordRender((Date.now() - renderStart) / 1000);
     recordUpload(fs.statSync(outPath).size + (fs.existsSync(r.thumbnailPath) ? fs.statSync(r.thumbnailPath).size : 0));
 
+    // independent quality control of the finished file (technical + editorial); a blocking failure rejects the video so
+    // produceUntil renders a replacement. QC_ENFORCE=false records the verdict without rejecting (calibration runs).
+    const attribution = creditText(c, { contactEmail: cfg.contactEmail });
+    const captionWords = transcript?.words.length ? transcript.words.map((w) => ({ word: w.word, start: timeline.map(w.start), end: timeline.map(w.end) })).filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end) && w.end >= 0) : null;
+    const siblings = (await store.listProductions({ candidate_id: c.id })).length;
+    const qc = await qualityControl(cfg, {
+      file: outPath, candidate: c, headline: copy.headline, caption: copy.caption, hashtags: copy.hashtags, commentaryMode,
+      publicText: [copy.caption, attribution, copy.hashtags.map((t) => `#${t}`).join(' ')].join('\n\n'), words: captionWords, siblingProductions: siblings,
+      transcribe: process.env.QC_RETRANSCRIBE === 'false' ? undefined : async (file) => { const a = await extractAudio(file, path.join(dir, 'qc_audio.mp3')); return a ? transcribe(cfg, a) : null; },
+    });
+    if (!qc.ok && process.env.QC_ENFORCE !== 'false') {
+      const why = qc.checks.filter((x) => !x.ok && x.severity === 'block').map((x) => `${x.name}: ${x.detail}`).join('; ').slice(0, 280);
+      await store.patchCandidate(c.id, { status: 'rejected_qc', status_reason: `QC: ${why}` });
+      log.info(`rejected ${c.id} by QC: ${why}`);
+      return null;
+    }
+
     // upload
     const key = `renders/${c.id}/${path.basename(outPath)}`;
     const up = await withRetry(`upload ${c.id}`, () => uploadPublic(cfg, outPath, key, 'video/mp4'), { attempts: 3, baseMs: 2000 });
     const thumb = await withRetry(`upload thumb ${c.id}`, () => uploadPublic(cfg, r.thumbnailPath, key.replace(/\.mp4$/, '.jpg'), 'image/jpeg'), { attempts: 3, baseMs: 2000 });
 
-    const attribution = creditText(c, { contactEmail: cfg.contactEmail });
     const prod: Production = {
       id: ulid(), candidate_id: c.id, headline: copy.headline, commentary: copy.commentary,
       caption_text: copy.caption,
@@ -173,6 +190,7 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
       edit_plan: JSON.stringify(timeline.beats),
       content_format: c.content_format ?? 'general_viral',
       production_cost_usd: Math.round((costOf(currentUsage()).total_usd - costAtStart) * 10000) / 10000,
+      qc_score: qc.score, qc_json: JSON.stringify({ ok: qc.ok, score: qc.score, checks: qc.checks, editorial: qc.editorial }),
       created_at: now(), updated_at: now(),
     };
     await store.upsertProduction(prod);

@@ -6,7 +6,7 @@
  */
 import {
   BufferClient, normaliseMetrics, runSync, updateCategoryWeights, buildWeekPlan, buildReadinessReport, formatReadinessMarkdown,
-  type Candidate, type CategoryWeight, type ContentCategory, type Production, type ScheduledPost, type SyncResult, type SyncStore, type WeekStatus,
+  type Candidate, type CategoryWeight, type ContentCategory, type Decision, type Production, type ScheduledPost, type SyncResult, type SyncStore, type WeekStatus,
 } from '@toaster/shared';
 
 export interface Env {
@@ -24,7 +24,7 @@ export interface Env {
 }
 
 const CANDIDATE_COLS = ['id', 'source_platform', 'source_id', 'source_url', 'media_url', 'author', 'author_url', 'title', 'description', 'category', 'duration_sec', 'width', 'height', 'published_at', 'discovered_at', 'views', 'likes', 'comments', 'shares', 'engagement_velocity', 'heuristic_score', 'llm_score', 'final_score', 'llm_rationale', 'safety_flags', 'phash', 'duplicate_of', 'rights_status', 'rights_basis', 'rights_evidence', 'rights_notes', 'copyright_risk', 'copyright_risk_reasons', 'quality_tier', 'detected_handle', 'detected_platform', 'visual_summary', 'attribution_text', 'content_format', 'meta_json', 'status', 'status_reason', 'updated_at'] as const;
-const PRODUCTION_COLS = ['id', 'candidate_id', 'headline', 'commentary', 'caption_text', 'hashtags', 'voice_id', 'music_track', 'r2_key', 'public_url', 'thumbnail_url', 'duration_sec', 'render_log', 'reuse_basis', 'edit_plan', 'content_format', 'production_cost_usd', 'created_at', 'updated_at'] as const;
+const PRODUCTION_COLS = ['id', 'candidate_id', 'headline', 'commentary', 'caption_text', 'hashtags', 'voice_id', 'music_track', 'r2_key', 'public_url', 'thumbnail_url', 'duration_sec', 'render_log', 'reuse_basis', 'edit_plan', 'content_format', 'production_cost_usd', 'qc_score', 'qc_json', 'created_at', 'updated_at'] as const;
 const POST_COLS = ['id', 'production_id', 'candidate_id', 'content_format', 'service', 'buffer_channel_id', 'buffer_post_id', 'slot_at', 'batch_week', 'state', 'last_synced_at', 'buffer_error', 'views', 'likes', 'comments', 'shares', 'metrics_updated_at', 'sync_error', 'missing_count', 'missing_since', 'idempotency_key', 'create_attempts', 'reuse_uncertain', 'public_text', 'review_block_stripped', 'created_at', 'updated_at'] as const;
 
 export default {
@@ -134,6 +134,25 @@ async function route(req: Request, env: Env, url: URL, ctx: ExecutionContext): P
   if (mm && m === 'GET') return json(await weekStatus(env, mm[1]));
 
   if (m === 'GET' && p === '/events') return json((await env.DB.prepare('SELECT * FROM events ORDER BY id DESC LIMIT 200').all()).results);
+
+  // control-plane settings (autopilot pause record, etc.) and the unattended-publishing decision log
+  mm = p.match(/^\/settings\/([a-z0-9_.-]+)$/);
+  if (mm && m === 'GET') { const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(mm[1]).first<{ value: string }>(); return json(row ? JSON.parse(row.value) : null); }
+  if (mm && m === 'PUT') {
+    const value = JSON.stringify(await req.json());
+    await env.DB.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at').bind(mm[1], value, new Date().toISOString()).run();
+    return json({ ok: true });
+  }
+  if (m === 'GET' && p === '/decisions') {
+    const limit = Math.min(2000, Number(url.searchParams.get('limit') ?? 500));
+    return json((await env.DB.prepare('SELECT * FROM decisions ORDER BY at DESC LIMIT ?').bind(limit).all()).results);
+  }
+  if (m === 'POST' && p === '/decisions') {
+    const d = (await req.json()) as Decision;
+    await env.DB.prepare('INSERT OR REPLACE INTO decisions (id, at, kind, production_id, candidate_id, service, slot_at, buffer_post_id, reasons, detail) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .bind(d.id, d.at, d.kind, d.production_id, d.candidate_id, d.service, d.slot_at, d.buffer_post_id, d.reasons, d.detail).run();
+    return json({ ok: true });
+  }
 
   mm = p.match(/^\/upload\/(.+)$/);
   if (mm && m === 'PUT') {

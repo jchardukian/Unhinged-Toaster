@@ -110,6 +110,13 @@ shortlist (title, platform, verified views, URL, comedy score, duration, rights 
 Buffer posts and does not touch the daily/weekly schedules; rights stay exactly as the general policy says (standard
 licence = transformation review, owner decides per draft).
 
+## Unattended operation
+
+See **docs/AUTONOMY.md**: five gates (documented rights, automated QC, minimum QC score, duplicate prevention,
+authorization + health), the two repository variables that switch it on, the "Emergency stop" workflow, the monitor that
+pauses it automatically, the decision log, and the finite calibration (`toaster calibration`) that has to pass first.
+Until the owner sets `UNATTENDED_PUBLISHING=true` and the authorization phrase, everything below (drafts) applies.
+
 ## Approval gate (what Buffer actually enforces)
 
 Every post is created with `saveToDraft: true` and its intended `dueAt` (the planned slot). A Buffer **draft** is not

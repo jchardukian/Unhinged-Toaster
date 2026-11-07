@@ -65,6 +65,7 @@ export type CandidateStatus =
   | 'rejected_duplicate'
   | 'rejected_safety'
   | 'rejected_quality'  // source below 720p-class
+  | 'rejected_qc'       // rendered video failed the automated quality-control gate
   | 'blocked_rights'
   | 'ready'          // cleared + scored, waiting to be produced
   | 'producing'
@@ -143,6 +144,8 @@ export interface Production {
   edit_plan?: string | null;                   // JSON EditBeats actually applied
   content_format?: ContentFormat | null;
   production_cost_usd?: number | null;         // metered: generation + LLM + TTS + Whisper for this one video
+  qc_score?: number | null;                    // automated QC editorial score 0-10 (null = not run)
+  qc_json?: string | null;                     // full QC result JSON (checks with severity, details)
   created_at: string;
   updated_at: string;
 }

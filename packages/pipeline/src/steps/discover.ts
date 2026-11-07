@@ -544,7 +544,7 @@ export function ytMetaFromApi(it: YtVideo): Record<string, unknown> {
  */
 export function youtubeFetchGuard(cfg: Pick<Config, 'ytdlpCookiesB64'>, env: NodeJS.ProcessEnv = process.env): { blocked: boolean; reason: string } {
   if (env.YTDLP_ASSUME_FETCHABLE === 'true' || cfg.ytdlpCookiesB64) return { blocked: false, reason: '' };
-  if (env.GITHUB_ACTIONS === 'true') return { blocked: true, reason: 'GitHub-hosted runner without YTDLP_COOKIES_B64: YouTube answers "sign in to confirm you\'re not a bot" (0/40 in the CI probe)' };
+  if (env.GITHUB_ACTIONS === 'true') return { blocked: true, reason: 'GitHub-hosted runner without YTDLP_COOKIES_B64: YouTube answers "sign in to confirm you\'re not a bot" for every player client, web_embedded included (fetch probe 2026-11-07: 0/6 downloads; metadata still works)' };
   return { blocked: false, reason: '' };
 }
 

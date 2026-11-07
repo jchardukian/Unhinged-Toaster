@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Candidate, CategoryWeight, DedupeExisting, Production, ScheduledPost } from '@toaster/shared';
+import type { Candidate, CategoryWeight, Decision, DedupeExisting, Production, ScheduledPost } from '@toaster/shared';
 import { defaultCategoryWeights } from '@toaster/shared';
 import type { Config } from './config.js';
 
@@ -20,6 +20,12 @@ export interface Store {
   listPosts(filter?: { state?: ScheduledPost['state'][]; week?: string }): Promise<ScheduledPost[]>;
   weights(): Promise<CategoryWeight[]>;
   saveWeights(w: CategoryWeight[]): Promise<void>;
+  /** control-plane settings (JSON values), e.g. the autopilot pause record */
+  getSetting<T>(key: string): Promise<T | null>;
+  setSetting<T>(key: string, value: T): Promise<void>;
+  /** unattended-publishing decision log (append-only) */
+  logDecision(d: Decision): Promise<void>;
+  listDecisions(limit?: number): Promise<Decision[]>;
 }
 
 export function makeStore(cfg: Config): Store {
@@ -27,7 +33,7 @@ export function makeStore(cfg: Config): Store {
   return new JsonStore(path.join(cfg.workDir, 'db.json'));
 }
 
-interface Db { candidates: Candidate[]; productions: Production[]; posts: ScheduledPost[]; weights: CategoryWeight[] }
+interface Db { candidates: Candidate[]; productions: Production[]; posts: ScheduledPost[]; weights: CategoryWeight[]; settings?: Record<string, unknown>; decisions?: Decision[] }
 
 export class JsonStore implements Store {
   private db: Db;
@@ -80,6 +86,10 @@ export class JsonStore implements Store {
   }
   async weights() { return this.db.weights; }
   async saveWeights(w: CategoryWeight[]) { this.db.weights = w; this.save(); }
+  async getSetting<T>(key: string) { return ((this.db.settings ?? {})[key] as T | undefined) ?? null; }
+  async setSetting<T>(key: string, value: T) { this.db.settings = { ...(this.db.settings ?? {}), [key]: value }; this.save(); }
+  async logDecision(d: Decision) { this.db.decisions = [...(this.db.decisions ?? []), d]; this.save(); }
+  async listDecisions(limit = 500) { return [...(this.db.decisions ?? [])].reverse().slice(0, limit); }
 }
 
 export class ApiStore implements Store {
@@ -118,4 +128,8 @@ export class ApiStore implements Store {
   }
   weights() { return this.req<CategoryWeight[]>('GET', '/weights'); }
   saveWeights(w: CategoryWeight[]) { return this.req<void>('PUT', '/weights', w); }
+  getSetting<T>(key: string) { return this.req<T | null>('GET', `/settings/${encodeURIComponent(key)}`); }
+  setSetting<T>(key: string, value: T) { return this.req<void>('PUT', `/settings/${encodeURIComponent(key)}`, value); }
+  logDecision(d: Decision) { return this.req<void>('POST', '/decisions', d); }
+  listDecisions(limit = 500) { return this.req<Decision[]>('GET', `/decisions?limit=${limit}`); }
 }

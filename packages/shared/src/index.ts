@@ -14,3 +14,4 @@ export * from './provenance.js';
 export * from './editplan.js';
 export * from './quality.js';
 export * from './formats.js';
+export * from './autopilot.js';

@@ -12,6 +12,9 @@ import { runPreflight } from './steps/preflight.js';
 import { runPilot, runSmoke, writeSummary } from './steps/ladder.js';
 import { runDogPilot } from './steps/dogpilot.js';
 import { runDogShortlist } from './steps/dogshortlist.js';
+import { autopilotMarkdown, autopilotStatus, logDecision, monitorAutopilot, pauseAutopilot, resumeAutopilot } from './steps/autopilot.js';
+import { calibrationReport } from './steps/calibration.js';
+import { qualityControl, qcSummaryLine } from './steps/qc.js';
 import { ensureSfxLibrary } from './steps/sfx.js';
 import { budget, isFatal, setBudget, spentUsd } from './guard.js';
 import { publishWeek } from './steps/publish.js';
@@ -34,6 +37,15 @@ Dog-content pilot (opt-in, manual, never publishes). Paid AI generation is PAUSE
   dog-shortlist [--top 30] [--limit 60] [--tiktok-handles a,b] [--no-reddit] [--no-tiktok]
                             discovery only: viral dog Shorts (YouTube shelves, 1M+ verified views), TikTok creators, Reddit dog subs
                             -> dog-comedy scoring -> ranked shortlist in work/dog-shortlist.md; stores nothing, drafts nothing
+
+Unattended publishing (OFF by default; see docs/AUTONOMY.md)
+  autopilot:status          is unattended publishing active, and if not, exactly why
+  stop [--reason TEXT]      EMERGENCY STOP: pause unattended publishing and pull every pending scheduled post out of Buffer
+  resume                    clear the pause record (the switch + authorization phrase must still be set)
+  incident "TEXT"           record a copyright complaint / platform warning: the monitor pauses unattended publishing
+  monitor                   run the health monitor once (publishing errors, QC collapse, breaker, budget, incidents)
+  calibration               compare the owner's draft verdicts with the automated QC; says when the gate is trustworthy
+  qc --file VIDEO.mp4       run the quality-control checks on a finished render (technical + editorial)
 
 Daily / weekly automation
   run-daily [--stock 10]    discover -> score -> keep >= N finished productions in stock -> fill open slots -> report
@@ -160,9 +172,10 @@ async function main() {
       const stock = Number(flags.stock ?? 10);
       const have = await produceUntil(cfg, store, stock);
       let pub = { created: 0, adopted: 0, failed: 0, openSlots: 0 };
-      if (cfg.bufferKey) pub = await publishWeek(cfg, store);
+      if (cfg.bufferKey) pub = await publishWithAutopilot(cfg, store);
+      await monitorAutopilot(cfg, store);
       const { report, markdown } = await readinessReport(cfg, store, 'next');
-      log.info(`run-daily done; stock ${have}/${stock}; drafts created ${pub.created}, adopted ${pub.adopted}, failed ${pub.failed}`);
+      log.info(`run-daily done; stock ${have}/${stock}; posts created ${pub.created}, adopted ${pub.adopted}, failed ${pub.failed}`);
       console.log(markdown);
       if (!report.complete) await alert('warn', `Next week (${report.week}) is not fully covered yet: ${report.videos_ready}/${report.target_videos} videos`, markdown, { issueKey: `readiness ${report.week}` });
       else await alert('info', `Next week (${report.week}) fully covered`, markdown);
@@ -179,7 +192,7 @@ async function main() {
       let last = { created: 0, adopted: 0, failed: 0, openSlots: 0 };
       for (let round = 1; round <= 3; round++) {
         await produceUntil(cfg, store, 21);
-        last = await publishWeek(cfg, store, { dryRun });
+        last = dryRun ? await publishWeek(cfg, store, { dryRun }) : await publishWithAutopilot(cfg, store);
         log.info(`run-weekly round ${round}: created ${last.created}, adopted ${last.adopted}, failed ${last.failed}, open ${last.openSlots}`);
         if (last.failed === 0 && last.openSlots === 0) break;
         if (last.failed === 0 && last.openSlots > 0) {
@@ -198,6 +211,18 @@ async function main() {
         if (!dryRun && !flags['allow-incomplete']) process.exitCode = 1;
       }
       return;
+    }
+    case 'autopilot:status': { const v = await autopilotStatus(cfg, store); console.log(autopilotMarkdown(v, cfg)); writeSummary(autopilotMarkdown(v, cfg)); return; }
+    case 'stop': { const r = await pauseAutopilot(cfg, store, String(flags.reason ?? 'emergency stop requested'), 'emergency-stop', { unschedule: true }); log.info(`emergency stop: unscheduled ${r.unscheduled}, failed ${r.failed}`); writeSummary(`## Emergency stop\n- unattended publishing paused\n- pending scheduled posts removed from Buffer: ${r.unscheduled} (failed ${r.failed})`); if (r.failed) process.exitCode = 1; return; }
+    case 'resume': { await resumeAutopilot(store); const v = await autopilotStatus(cfg, store); console.log(autopilotMarkdown(v, cfg)); return; }
+    case 'incident': { const text = String(rest.find((a) => !a.startsWith('--')) ?? flags.text ?? 'incident'); await store.setSetting('incident', { text, at: new Date().toISOString() }); await logDecision(store, { kind: 'pause', production_id: null, candidate_id: null, service: null, slot_at: null, buffer_post_id: null, reasons: JSON.stringify([`incident recorded: ${text}`]), detail: null }); const m = await monitorAutopilot(cfg, store); console.log(JSON.stringify(m)); return; }
+    case 'monitor': { const m = await monitorAutopilot(cfg, store); console.log(JSON.stringify(m)); return; }
+    case 'calibration': { const r = calibrationReport(await store.listProductions(), await store.listPosts(), cfg.unattendedMinQc); console.log(r.markdown); writeSummary(r.markdown); return; }
+    case 'qc': {
+      const file = String(flags.file ?? ''); if (!file) throw new Error('--file required');
+      const r = await qualityControl(cfg, { file, candidate: { id: 'manual', safety_flags: '[]', source_url: 'https://example.invalid/src', author: null, rights_status: 'cleared', rights_basis: 'owned' }, headline: String(flags.headline ?? 'QC TEST'), caption: String(flags.caption ?? 'caption'), publicText: `caption\n📩 contact`, hashtags: ['funny', 'shorts', 'fails'], words: null, commentaryMode: 'outro_voice', siblingProductions: 0, editorial: flags['no-editorial'] ? false : true });
+      console.log(qcSummaryLine(r)); for (const c of r.checks) console.log(`${c.ok ? 'ok  ' : c.severity === 'warn' ? 'warn' : 'FAIL'} ${c.name}: ${c.detail}`);
+      if (!r.ok) process.exitCode = 1; return;
     }
     case 'status': return status(store);
     case 'buffer:tags': {
@@ -246,6 +271,14 @@ async function main() {
       console.log(USAGE);
       process.exitCode = cmd ? 1 : 0;
   }
+}
+
+/** Drafts by default; schedules without approval only when the autopilot gate is active (switch + phrase + no stop + no pause). */
+async function publishWithAutopilot(cfg: Config, store: Store): Promise<{ created: number; adopted: number; failed: number; openSlots: number }> {
+  const v = await autopilotStatus(cfg, store);
+  writeSummary(autopilotMarkdown(v, cfg));
+  if (!v.active) return publishWeek(cfg, store);
+  return publishWeek(cfg, store, { unattended: { active: true, minQc: cfg.unattendedMinQc, reviewDrafts: cfg.unattendedReviewDrafts, decide: (d) => logDecision(store, d) } });
 }
 
 async function discoverInto(cfg: Config, store: Store, sources: SourceAdapter[], limit: number): Promise<number> {

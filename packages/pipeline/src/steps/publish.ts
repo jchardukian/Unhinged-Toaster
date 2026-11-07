@@ -1,4 +1,4 @@
-import { BufferApiError, BufferClient, buildWeekPlan, creditText, hasReviewBlock, toBufferDueAt, ulid, type BufferService, type Candidate, type Production, type ScheduledPost, type SlotPlan } from '@toaster/shared';
+import { AUTOPILOT_AUTHORIZATION_PHRASE, BufferApiError, BufferClient, buildWeekPlan, creditText, hasReviewBlock, toBufferDueAt, ulid, unattendedEligible, type BufferService, type Candidate, type Production, type ScheduledPost, type SlotPlan } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { isTransient, withRetry } from '../retry.js';
 import type { Store } from '../store.js';
@@ -46,6 +46,12 @@ export interface PublishOptions {
   minLeadHours?: number;
   /** pilot: draft at most this many productions (each becomes 2 posts) */
   limit?: number;
+  /**
+   * Unattended publishing: schedule (not draft) productions that pass the rights + QC gate. The caller must have checked
+   * autopilotStatus().active; every decision is logged through `decide`. Productions that fail the gate are drafted
+   * only when `reviewDrafts` is true, otherwise skipped (logged as 'skip').
+   */
+  unattended?: { active: true; minQc: number; reviewDrafts: boolean; decide: (d: Omit<import('@toaster/shared').Decision, 'id' | 'at'>) => Promise<import('@toaster/shared').Decision> };
 }
 
 export interface PublishResult { created: number; adopted: number; skipped: number; failed: number; openSlots: number; weeks: string[] }
@@ -102,11 +108,27 @@ export async function publishWeek(cfg: Config, store: Store, opts: PublishOption
         row.reuse_uncertain = dt.uncertain;
         row.public_text = dt.publicText;
         row.review_block_stripped = true; // captions never carry review text anymore
-        if (!client) { log.info(`[dry-run] would create ${service} draft for ${slotAt}: "${prod.headline}" <- ${prod.public_url}`); result.created++; continue; }
+        // unattended mode: rights + QC gate decides between SCHEDULE, draft-for-optional-review, or skip
+        let schedule: { decisionId: string } | null = null;
+        if (opts.unattended) {
+          const elig = cand ? unattendedEligible(cand, prod, opts.unattended.minQc) : { eligible: false, reasons: ['candidate record missing'], basis: null, qcScore: prod.qc_score ?? null };
+          if (elig.eligible) {
+            const d = await opts.unattended.decide({ kind: 'schedule', production_id: prod.id, candidate_id: prod.candidate_id, service, slot_at: slotAt, buffer_post_id: null, reasons: JSON.stringify([`rights ${elig.basis} documented`, `QC ${elig.qcScore}`]), detail: JSON.stringify({ rights_evidence: cand?.rights_evidence, qc_score: elig.qcScore, headline: prod.headline }) });
+            schedule = { decisionId: d.id };
+          } else if (opts.unattended.reviewDrafts) {
+            await opts.unattended.decide({ kind: 'hold', production_id: prod.id, candidate_id: prod.candidate_id, service, slot_at: slotAt, buffer_post_id: null, reasons: JSON.stringify(elig.reasons), detail: JSON.stringify({ drafted_for_review: true }) });
+          } else {
+            await opts.unattended.decide({ kind: 'skip', production_id: prod.id, candidate_id: prod.candidate_id, service, slot_at: slotAt, buffer_post_id: null, reasons: JSON.stringify(elig.reasons), detail: null });
+            result.skipped++;
+            continue;
+          }
+        }
+        if (!client) { log.info(`[dry-run] would create ${service} ${schedule ? 'SCHEDULED post' : 'draft'} for ${slotAt}: "${prod.headline}" <- ${prod.public_url}`); result.created++; continue; }
         try {
-          const outcome = await createDraftIdempotent(cfg, client, row, prod, dt.text, now);
+          const outcome = await createDraftIdempotent(cfg, client, row, prod, dt.text, now, schedule);
           row.buffer_post_id = outcome.post.id;
-          row.state = (outcome.post.status as ScheduledPost['state']) || row.state;
+          row.state = (outcome.post.status as ScheduledPost['state']) || (schedule ? 'scheduled' : row.state);
+          if (schedule) await opts.unattended!.decide({ kind: 'schedule', production_id: prod.id, candidate_id: prod.candidate_id, service, slot_at: slotAt, buffer_post_id: outcome.post.id, reasons: JSON.stringify([outcome.adopted ? 'adopted existing Buffer post' : 'created in Buffer', `status ${row.state}`]), detail: JSON.stringify({ decision_id: schedule.decisionId }) });
           row.buffer_error = null;
           row.last_synced_at = now().toISOString();
           if (outcome.adopted) result.adopted++; else result.created++;
@@ -134,7 +156,7 @@ export function bufferTagsFor(cfg: Config, uncertain: boolean): string[] | undef
   return id ? [id] : undefined;
 }
 
-async function createDraftIdempotent(cfg: Config, client: BufferClient, row: ScheduledPost, prod: Production, text: string, now: () => Date): Promise<{ post: { id: string; status: string }; adopted: boolean }> {
+async function createDraftIdempotent(cfg: Config, client: BufferClient, row: ScheduledPost, prod: Production, text: string, now: () => Date, schedule: { decisionId: string } | null = null): Promise<{ post: { id: string; status: string }; adopted: boolean }> {
   if (!prod.public_url || !/^https?:\/\//.test(prod.public_url)) throw new Error(`production ${prod.id} has no public URL (R2 not configured?)`);
   const existing = await client.findPostAt(cfg.bufferOrgId, row.buffer_channel_id, row.slot_at).catch(() => null);
   if (existing) return { post: existing, adopted: true };
@@ -150,8 +172,9 @@ async function createDraftIdempotent(cfg: Config, client: BufferClient, row: Sch
       videoUrl: prod.public_url!,
       dueAt: toBufferDueAt(row.slot_at, cfg.tz),
       mode: 'customScheduled',
-      saveToDraft: cfg.approvalMode !== 'needs_approval',
-      needsApproval: cfg.approvalMode === 'needs_approval',
+      saveToDraft: schedule ? false : cfg.approvalMode !== 'needs_approval',
+      needsApproval: schedule ? false : cfg.approvalMode === 'needs_approval',
+      autopilot: schedule ? { authorization: cfg.unattendedAuthorization ?? '', decisionId: schedule.decisionId } : undefined,
       videoTitle: prod.headline,
       youtube: row.service === 'youtube' ? { title: prod.headline.slice(0, 100), categoryId: YOUTUBE_CATEGORY_COMEDY, privacy: 'public', madeForKids: false, notifySubscribers: true, isAiGenerated: true, license: 'youtube' } : undefined,
       tiktok: row.service === 'tiktok' ? { title: prod.headline.slice(0, 90), isAiGenerated: true } : undefined,

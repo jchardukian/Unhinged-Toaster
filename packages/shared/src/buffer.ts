@@ -1,3 +1,4 @@
+import { AUTOPILOT_AUTHORIZATION_PHRASE } from './autopilot.js';
 /**
  * Minimal Buffer GraphQL client (https://api.buffer.com).
  * Verified against Buffer's developer docs on 2026-11-02:
@@ -49,8 +50,11 @@ export interface CreateVideoPostInput {
   mode?: BufferMode;
   saveToDraft?: boolean;
   needsApproval?: boolean;     // Team plan only
-  /** Escape hatch for a future human-confirmed flow. Never set by the pipeline. */
-  unsafeAllowScheduled?: boolean;
+  /**
+   * Unattended publishing: the ONLY way to create a non-draft post. The caller must pass the decision id it logged and
+   * the exact owner authorization phrase; the autopilot gate (shared/autopilot.ts) decides whether it is allowed at all.
+   */
+  autopilot?: { authorization: string; decisionId: string };
   youtube?: { title: string; categoryId: string; privacy?: 'public' | 'private' | 'unlisted'; madeForKids?: boolean; notifySubscribers?: boolean; license?: 'youtube' | 'creativeCommon'; isAiGenerated?: boolean };
   tiktok?: { title?: string; isAiGenerated?: boolean };
   tagIds?: string[];
@@ -118,14 +122,17 @@ export class BufferClient {
   /**
    * Create a video post. Defaults to a DRAFT (saveToDraft: true) — nothing is published without approval.
    * Publish guard: refuses shareNow/shareNext and refuses non-draft posts unless `needsApproval` (Team plan queue)
-   * or the explicit `unsafeAllowScheduled` escape hatch is set.
+   * or the explicit `autopilot` block carries the owner's authorization phrase and a logged decision id.
    */
   async createVideoPost(input: CreateVideoPostInput): Promise<BufferPost> {
     const mode = input.mode ?? (input.dueAt ? 'customScheduled' : 'addToQueue');
     const saveToDraft = input.saveToDraft ?? true;
     if (mode === 'shareNow' || mode === 'shareNext') throw new BufferApiError(`publish guard: mode ${mode} is not allowed`, 0);
-    if (!saveToDraft && !input.needsApproval && !input.unsafeAllowScheduled) {
-      throw new BufferApiError('publish guard: posts must be created as drafts (saveToDraft) or needsApproval', 0);
+    if (!saveToDraft && !input.needsApproval) {
+      const a = input.autopilot;
+      if (!a || a.authorization !== AUTOPILOT_AUTHORIZATION_PHRASE || !/^[0-9A-Z]{26}$/.test(a.decisionId)) {
+        throw new BufferApiError('publish guard: posts must be created as drafts (saveToDraft), needsApproval, or by the authorized autopilot with a logged decision', 0);
+      }
     }
     const metadata: Record<string, unknown> = {};
     if (input.youtube) metadata.youtube = { privacy: 'public', madeForKids: false, notifySubscribers: true, ...input.youtube };
