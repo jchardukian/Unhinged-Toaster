@@ -27,6 +27,14 @@ has to pass before the switch is turned on. Everything here is implemented in co
    post already at the slot before creating, decisions carry the production id.
 5. **Authorization + health**: the switch, the phrase, no emergency stop, no pause record (below).
 
+## Fair-use policy (owner decision 2026-11-07)
+Videos without a documented licence can be scheduled unattended ONLY when `UNATTENDED_FAIR_USE=true` is set AND the
+production's recorded fair-use assessment (`shared/fairuse.ts`, stored as `fair_use_json`) is `supportable`. The
+assessment records seven factors and never treats commentary, captions, attribution or effects as clearance by
+themselves; market effect is always logged as an assumption; model ratings can only lower a verdict. `uncertain` and
+`not_supportable` are never scheduled unattended. Every scheduling decision carries the full assessment and the words
+"NOT a licence". See docs/LAUNCH.md.
+
 ## Switching it on (one-time owner authorization)
 
 Unattended publishing is OFF by default and cannot be turned on by code, by a workflow input or by ChatGPT. The owner

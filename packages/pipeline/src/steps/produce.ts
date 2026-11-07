@@ -259,16 +259,17 @@ export async function produceUntil(cfg: Config, store: Store, target: number): P
   // 1080p-class sources first (known from discovery metadata or a previous probe); 720p-class only if still short.
   const tierOf = (c: Candidate) => c.quality_tier ?? qualityTier(c.width, c.height);
   const hdOrUnknown = ready.filter((c) => tierOf(c) !== 'ok' && tierOf(c) !== 'low');
-  const okOnly = ready.filter((c) => tierOf(c) === 'ok');
-  log.info(`need ${target - have} more productions; ${hdOrUnknown.length} 1080p-class/unprobed + ${okOnly.length} 720p-class candidates available`);
+  log.info(`need ${target - have} more productions; ${hdOrUnknown.length} 1080p-class/unprobed + ${ready.length - hdOrUnknown.length} 720p-class candidates available`);
   for (const c of hdOrUnknown) {
     if (have >= target) break;
     const p = await produceCandidate(cfg, store, c, { allowOkTier: false });
     if (p) have++;
   }
-  if (have < target && okOnly.length) {
-    log.warn(`1080p-class stock exhausted; falling back to ${okOnly.length} 720p-class candidate(s)`);
+  if (have < target) {
+    // re-read: the first pass probes unknown sources and HOLDS the 720p-class ones, so the fallback list must be rebuilt
+    // here (computing it before the pass left every Reddit-RSS candidate, which carries no resolution, unused)
     const held = (await store.listCandidates({ status: ['scored', 'ready'] })).filter((c) => tierOf(c) === 'ok' && productionBasis(c, policy) !== null);
+    if (held.length) log.warn(`1080p-class stock exhausted; falling back to ${held.length} 720p-class candidate(s)`);
     for (const c of held) {
       if (have >= target) break;
       const p = await produceCandidate(cfg, store, c, { allowOkTier: true });
