@@ -5,6 +5,8 @@ import type { Store } from '../store.js';
 import { unpostedProductions } from './produce.js';
 
 export const YOUTUBE_CATEGORY_COMEDY = '23';
+/** Minimum lead before a slot for an autopilot-scheduled post (no owner approval step; Buffer fetches the video). */
+export const UNATTENDED_MIN_LEAD_HOURS = 2;
 
 export function bufferClient(cfg: Config): BufferClient {
   if (!cfg.bufferKey) throw new Error('BUFFER_API_KEY not set (Buffer > Settings > API)');
@@ -66,10 +68,24 @@ export interface PublishResult { created: number; adopted: number; skipped: numb
 export async function publishWeek(cfg: Config, store: Store, opts: PublishOptions = {}): Promise<PublishResult> {
   const now = opts.now ?? (() => new Date());
   const weeks = opts.weeks ?? ['current', 'next'];
-  const lead = (opts.minLeadHours ?? 20) * 3600_000;
+  // drafts need owner time to approve (20 h); scheduled autopilot posts only need Buffer time to fetch the video
+  const lead = (opts.minLeadHours ?? (opts.unattended ? UNATTENDED_MIN_LEAD_HOURS : 20)) * 3600_000;
   const result: PublishResult = { created: 0, adopted: 0, skipped: 0, failed: 0, openSlots: 0, weeks: [] };
   const client = opts.dryRun ? null : opts.client ?? bufferClient(cfg);
-  const pool = (await unpostedProductions(store)).slice(0, opts.limit ?? Infinity);
+  let pool = (await unpostedProductions(store)).slice(0, opts.limit ?? Infinity);
+  if (opts.unattended && !opts.unattended.reviewDrafts) {
+    // An ineligible production would take a slot, be skipped, and leave that slot empty on every run. Skip it once,
+    // logged, before slot assignment so eligible productions fill the slots.
+    const kept: Production[] = [];
+    for (const p of pool) {
+      const cand = await store.getCandidate(p.candidate_id);
+      const elig = cand ? unattendedEligible(cand, p, opts.unattended.minQc, { fairUse: opts.unattended.fairUse }) : { eligible: false, reasons: ['candidate record missing'] };
+      if (elig.eligible) { kept.push(p); continue; }
+      await opts.unattended.decide({ kind: 'skip', production_id: p.id, candidate_id: p.candidate_id, service: null, slot_at: null, buffer_post_id: null, reasons: JSON.stringify(elig.reasons), detail: JSON.stringify({ headline: p.headline }) });
+      result.skipped++;
+    }
+    pool = kept;
+  }
 
   for (const which of weeks) {
     const plan: SlotPlan = buildWeekPlan(now(), cfg.tz, cfg.publishSlots, ['youtube', 'tiktok'], which === 'current' ? 0 : 1);

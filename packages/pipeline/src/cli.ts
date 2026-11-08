@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { buildWeekPlan, canProduce, permissionRequestMessage, ulid, type Candidate, type RightsBasis, type SourceAdapter } from '@toaster/shared';
+import { buildWeekPlan, canProduce, permissionRequestMessage, ulid, unattendedEligible, type Candidate, type Production, type RightsBasis, type SourceAdapter } from '@toaster/shared';
 import { alert } from './alerts.js';
 import { loadConfig, log, repoRoot, type Config } from './config.js';
 import { makeStore, type Store } from './store.js';
@@ -169,10 +169,20 @@ async function main() {
       await rescoreUnscored(store);
       await discoverInto(cfg, store, defaultSources(cfg).split(',').filter(Boolean) as SourceAdapter[], Number(flags.limit ?? 50));
       await scoreAll(cfg, store);
+      // Reconcile with Buffer first (posts deleted there free their slots once confirmed by a second poll >= 10 min
+      // later, below). No replacement drafts here: the publish step below fills freed slots through the autopilot gate.
+      if (cfg.bufferKey) await syncQuiet(cfg, store);
       const stock = Number(flags.stock ?? 10);
-      const have = await produceUntil(cfg, store, stock);
+      const ap = await autopilotStatus(cfg, store);
+      const countable = ap.active && !cfg.unattendedReviewDrafts ? async (p: Production) => {
+        const c = await store.getCandidate(p.candidate_id);
+        return !!c && unattendedEligible(c, p, cfg.unattendedMinQc, { fairUse: cfg.unattendedFairUse }).eligible;
+      } : undefined;
+      // stop starting new productions well before the 100-minute step limit so publishing always runs
+      const deadline = runStart + Number(process.env.PRODUCE_BUDGET_MINUTES ?? 70) * 60_000;
+      const have = await produceUntil(cfg, store, stock, { countable, deadline });
       let pub = { created: 0, adopted: 0, failed: 0, openSlots: 0 };
-      if (cfg.bufferKey) pub = await publishWithAutopilot(cfg, store);
+      if (cfg.bufferKey) { await syncQuiet(cfg, store); pub = await publishWithAutopilot(cfg, store); }
       await monitorAutopilot(cfg, store);
       const { report, markdown } = await readinessReport(cfg, store, 'next');
       log.info(`run-daily done; stock ${have}/${stock}; posts created ${pub.created}, adopted ${pub.adopted}, failed ${pub.failed}`);
@@ -306,6 +316,16 @@ async function main() {
 }
 
 /** Drafts by default; schedules without approval only when the autopilot gate is active (switch + phrase + no stop + no pause). */
+const runStart = Date.now();
+
+/** Buffer sync without replacement drafts; a sync failure never blocks the run. */
+async function syncQuiet(cfg: Config, store: Store): Promise<void> {
+  try {
+    const r = await syncBuffer(cfg, store, { replace: false });
+    log.info(`buffer sync: ${JSON.stringify({ rejected: r.rejected, errors: r.errors.length })}`);
+  } catch (e) { log.warn(`buffer sync failed (continuing): ${(e as Error).message}`); }
+}
+
 async function publishWithAutopilot(cfg: Config, store: Store, opts: { dryRun?: boolean } = {}): Promise<{ created: number; adopted: number; failed: number; openSlots: number; weeks: string[] }> {
   const v = await autopilotStatus(cfg, store);
   writeSummary(autopilotMarkdown(v, cfg));
