@@ -67,6 +67,9 @@ export class BufferApiError extends Error {
   }
 }
 
+/** Buffer's wording for a post that no longer exists (deleted by the owner or by an emergency stop). */
+const NOT_FOUND_RE = /not.?found|does not exist|no such post/i;
+
 export class BufferClient {
   private readonly endpoint: string;
   private readonly f: typeof fetch;
@@ -202,9 +205,23 @@ export class BufferClient {
       try {
         raw = await this.gqlRaw(`query(${varDecl}) { ${parts.join('\n')} }`, vars);
       } catch (e) {
+        // A 4xx answer (not 429) is about the query's content, typically one deleted post failing the whole batch:
+        // look each id up on its own so live posts and deleted posts are told apart. 5xx/429/network stay errors.
+        const st = e instanceof BufferApiError ? e.status : 0;
+        if (chunk.length > 1 && st >= 400 && st < 500 && st !== 429) {
+          for (const id of chunk) out.set(id, await this.lookupOne(id));
+          continue;
+        }
+        if (chunk.length === 1 && st >= 400 && st < 500 && st !== 429 && NOT_FOUND_RE.test((e as Error).message)) { out.set(chunk[0], { status: 'not_found' }); continue; }
         failedChunks++;
         firstError ??= e as Error;
         for (const id of chunk) out.set(id, { status: 'error', message: (e as Error).message });
+        continue;
+      }
+      // One missing post can null the whole `data` object (GraphQL null propagation): no alias is usable, so fall
+      // back to one lookup per id instead of reporting every post, live ones included, as an error.
+      if (chunk.length > 1 && !raw.data && raw.errors?.length) {
+        for (const id of chunk) out.set(id, await this.lookupOne(id));
         continue;
       }
       const errByAlias = new Map<string, string>();
@@ -216,8 +233,8 @@ export class BufferClient {
         const alias = `p${k}`;
         const post = raw.data?.[alias];
         if (post) { out.set(id, { status: 'found', post }); return; }
-        const msg = errByAlias.get(alias) ?? (raw.errors ?? []).find((e) => e.message.includes(id))?.message;
-        if (msg && /not found/i.test(msg)) out.set(id, { status: 'not_found' });
+        const msg = errByAlias.get(alias) ?? (raw.errors ?? []).find((e) => e.message.includes(id))?.message ?? (chunk.length === 1 ? raw.errors?.[0]?.message : undefined);
+        if (msg && NOT_FOUND_RE.test(msg)) out.set(id, { status: 'not_found' });
         else if (msg) out.set(id, { status: 'error', message: msg });
         else if (raw.data && alias in raw.data) out.set(id, { status: 'not_found' });
         else out.set(id, { status: 'error', message: 'missing alias in response' });
@@ -226,6 +243,16 @@ export class BufferClient {
     // Buffer completely unreachable: surface it as one failure so the caller treats the whole poll as failed.
     if (chunks > 0 && failedChunks === chunks && firstError) throw firstError;
     return out;
+  }
+
+  /** Single-id lookup used when a batched lookup cannot attribute its errors to individual posts. */
+  private async lookupOne(id: string): Promise<PostLookup> {
+    try {
+      const m = await this.lookupPosts([id]);
+      return m.get(id) ?? { status: 'error', message: 'no lookup result' };
+    } catch (e) {
+      return { status: 'error', message: (e as Error).message };
+    }
   }
 
   /** Raw GraphQL call that returns data + errors without throwing on partial results. Throws on transport failure. */
