@@ -251,11 +251,14 @@ export async function rescoreUnscored(store: Store): Promise<number> {
 }
 
 /** Produce until we have `target` productions not yet attached to a post. */
-export async function produceUntil(cfg: Config, store: Store, target: number): Promise<number> {
+export async function produceUntil(cfg: Config, store: Store, target: number, opts: ProduceUntilOptions = {}): Promise<number> {
   // a run that died mid-render (timeout, OOM) leaves candidates in 'producing'; they are good candidates, give them back
   for (const stale of await store.listCandidates({ status: ['producing'] })) await store.patchCandidate(stale.id, { status: 'scored', status_reason: 'recovered from an interrupted run' });
   const unposted = await unpostedProductions(store);
-  let have = unposted.length;
+  const countable = opts.countable ?? (() => true);
+  let have = 0;
+  for (const p of unposted) if (await countable(p)) have++;
+  const timeUp = () => opts.deadline !== undefined && Date.now() >= opts.deadline;
   if (have >= target) return have;
   const policy = rightsPolicy(cfg);
   const ready = (await store.listCandidates({ status: ['scored', 'ready'] })).filter((c) => productionBasis(c, policy) !== null);
@@ -264,22 +267,30 @@ export async function produceUntil(cfg: Config, store: Store, target: number): P
   const hdOrUnknown = ready.filter((c) => tierOf(c) !== 'ok' && tierOf(c) !== 'low');
   log.info(`need ${target - have} more productions; ${hdOrUnknown.length} 1080p-class/unprobed + ${ready.length - hdOrUnknown.length} 720p-class candidates available`);
   for (const c of hdOrUnknown) {
-    if (have >= target) break;
+    if (have >= target || timeUp()) break;
     const p = await produceCandidate(cfg, store, c, { allowOkTier: false });
-    if (p) have++;
+    if (p && await countable(p)) have++;
   }
-  if (have < target) {
+  if (have < target && !timeUp()) {
     // re-read: the first pass probes unknown sources and HOLDS the 720p-class ones, so the fallback list must be rebuilt
     // here (computing it before the pass left every Reddit-RSS candidate, which carries no resolution, unused)
     const held = (await store.listCandidates({ status: ['scored', 'ready'] })).filter((c) => tierOf(c) === 'ok' && productionBasis(c, policy) !== null);
     if (held.length) log.warn(`1080p-class stock exhausted; falling back to ${held.length} 720p-class candidate(s)`);
     for (const c of held) {
-      if (have >= target) break;
+      if (have >= target || timeUp()) break;
       const p = await produceCandidate(cfg, store, c, { allowOkTier: true });
-      if (p) have++;
+      if (p && await countable(p)) have++;
     }
   }
+  if (timeUp() && have < target) log.warn(`production time budget reached with ${have}/${target} in stock; publishing what is ready`);
   return have;
+}
+
+export interface ProduceUntilOptions {
+  /** Which unposted productions count toward the target (autopilot: only those eligible for unattended scheduling). */
+  countable?: (p: Production) => boolean | Promise<boolean>;
+  /** Epoch ms after which no new production starts, so the publish step always runs before the job times out. */
+  deadline?: number;
 }
 
 /** Finished productions not yet attached to a live post, best candidate score first (viral-first), then oldest. */

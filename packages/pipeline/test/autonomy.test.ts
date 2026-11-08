@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AUTOPILOT_AUTHORIZATION_PHRASE, BufferClient, type Candidate, type Decision, type Production } from '@toaster/shared';
+import { AUTOPILOT_AUTHORIZATION_PHRASE, BufferClient, buildWeekPlan, type Candidate, type Decision, type Production } from '@toaster/shared';
 import { captionOverlap, captionTimingIssues, editorialGate, parseIntervals, parseLufs, qcScore, score10 } from '../src/steps/qc.js';
 import { calibrationReport, ownerVerdicts } from '../src/steps/calibration.js';
 import { publishWeek } from '../src/steps/publish.js';
@@ -109,9 +109,12 @@ test('unattended publishing schedules only documented-rights + QC-passed product
   const r = await publishWeek(c, store, { client, now, weeks: ['next'], unattended: { active: true, minQc: 7, reviewDrafts: false, decide: async (d) => { const full = { id: '01ARZ3NDEKTSV4RRFFQ69G5FAV', at: 'now', ...d } as Decision; decisions.push(full); return full; } } });
   assert.equal(fake.created.length, 2, 'the one eligible production is scheduled on YouTube and TikTok');
   assert.ok(fake.created.every((x) => x.saveToDraft === false), 'scheduled, not drafted');
-  assert.equal(r.skipped, 4, 'review-path and QC-failed productions are skipped on both services');
+  assert.equal(r.skipped, 2, 'review-path and QC-failed productions are skipped once each, before slot assignment');
   const kinds = decisions.map((d) => d.kind);
-  assert.ok(kinds.filter((k) => k === 'schedule').length >= 2 && kinds.filter((k) => k === 'skip').length === 4, kinds.join(','));
+  assert.ok(kinds.filter((k) => k === 'schedule').length >= 2 && kinds.filter((k) => k === 'skip').length === 2, kinds.join(','));
+  // the ineligible P2 has the highest score but must not burn the first slot: the eligible P1 takes it
+  const firstSlot = buildWeekPlan(now(), c.tz, c.publishSlots, ['youtube', 'tiktok'], 1).slots.map((s) => s.slot_at).sort()[0];
+  assert.ok((await store.listPosts({ state: ['scheduled'] })).every((p) => p.slot_at === firstSlot), 'eligible production fills the earliest slot');
   const skipReasons = decisions.filter((d) => d.kind === 'skip').map((d) => JSON.parse(d.reasons).join(' '));
   assert.ok(skipReasons.some((s) => /rights not documented/.test(s)) && skipReasons.some((s) => /QC failed/.test(s)));
   const posts = await store.listPosts({ state: ['scheduled'] });
