@@ -295,7 +295,10 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     const colors = (border.colors.length ? border.colors : ['#FF6A00', '#FFB347', '#FF3D00']).slice(0, 4);
     const cArgs = colors.map((c, i) => `c${i}=${c}`).join(':');
     const base = colors[0];
-    f.push(`gradients=s=${W}x${H}:${cArgs}:nb_colors=${colors.length}:speed=${border.speed}:rate=${fps},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(X,${bpx})+lt(Y,${bpx})+gte(X,${W - bpx})+gte(Y,${H - bpx}),255,0)'[ring]`);
+    // edge mask via a filled box + alphamerge (a per-pixel geq alpha was ~4x slower and pushed renders past the job limit)
+    f.push(`gradients=s=${W}x${H}:${cArgs}:nb_colors=${colors.length}:speed=${border.speed}:rate=${fps},format=rgba[grad]`);
+    f.push(`color=c=white:s=${W}x${H}:r=${fps},drawbox=x=${bpx}:y=${bpx}:w=${W - 2 * bpx}:h=${H - 2 * bpx}:color=black:t=fill,format=gray[edge]`);
+    f.push(`[grad][edge]alphamerge[ring]`);
     f.push(`[vbase][ring]overlay=x=0:y=0:shortest=1:format=auto[vb1]`);
     const g1 = Math.max(2, Math.round(border.glowPx / 2)), g2 = Math.max(2, Math.round(border.glowPx));
     f.push(`[vb1]drawbox=x=${bpx}:y=${bpx}:w=${W - 2 * bpx}:h=${H - 2 * bpx}:color=${base}@0.28:t=${g1},drawbox=x=${bpx + g1}:y=${bpx + g1}:w=${W - 2 * (bpx + g1)}:h=${H - 2 * (bpx + g1)}:color=${base}@0.12:t=${g2},format=yuv420p[vout]`);
