@@ -47,7 +47,7 @@ export async function templateAb(cfg: Config, store: Store, candidateId: string,
       edits: { freeze: !!timeline.beats.freeze, punchIn: !!timeline.beats.punchIn, replay: !!timeline.beats.replay, captions: (words?.length ?? 0) >= 6 },
       publicText: [prod.caption_text, creditText(c, { contactEmail: cfg.contactEmail })].join('\n\n'),
       words: words ? words.map((w) => ({ word: w.word, start: timeline.map(w.start), end: timeline.map(w.end) })) : null,
-      siblingProductions: 1, sourceSpeech: speech && speech.wordCount > 0 ? { language: speech.language, words: speech.wordCount, excerpt: speech.text.slice(0, 300) } : null,
+      siblingProductions: 0, // preview of an existing production, not a second production sourceSpeech: speech && speech.wordCount > 0 ? { language: speech.language, words: speech.wordCount, excerpt: speech.text.slice(0, 300) } : null,
     });
     out[label] = { file, renderSec, qc };
     log.info(`AB ${label}: render ${renderSec.toFixed(1)} s, QC ${qc.ok ? 'PASS' : 'FAIL'} ${qc.score ?? '-'}`);

@@ -38,7 +38,7 @@ export interface Template {
   /** thin animated neon border with a moving glow (branding); optional */
   border?: { enabled: boolean; px: number; glowPx: number; colors: string[]; speed: number; glowAlpha?: [number, number] };
   /** sizes of the on-clip edit graphics (defaults = the original template) */
-  effects?: { freezeTextDiv?: number; replayLabelDiv?: number; stickerDiv?: number; stickerBox?: string; stickerText?: string; stickerBorder?: number };
+  effects?: { freezeTextDiv?: number; replayLabelDiv?: number; replayLabelRight?: boolean; replayLabelY?: number; stickerDiv?: number; stickerBox?: string; stickerText?: string; stickerBorder?: number };
 }
 
 export interface RenderJob {
@@ -217,7 +217,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   if (b.replay) {
     const z = b.replay.zoom;
     const zw = even(Math.round(cw * z)), zh = even(Math.round(ch * z));
-    const label = `drawtext=fontfile='${esc(font)}':text='REPLAY':fontsize=${Math.round(cw / (t.effects?.replayLabelDiv ?? 16))}:fontcolor=${t.colors.white}:box=1:boxcolor=${t.colors.red}:boxborderw=12:x=28:y=28`;
+    const label = `drawtext=fontfile='${esc(font)}':text='REPLAY':fontsize=${Math.round(cw / (t.effects?.replayLabelDiv ?? 16))}:fontcolor=${t.colors.white}:box=1:boxcolor=${t.colors.red}:boxborderw=12:x=${t.effects?.replayLabelRight ? 'w-text_w-28' : '28'}:y=${t.effects?.replayLabelY ?? 28}`;
     f.push(`[cR]trim=${b.replay.from.toFixed(3)}:${b.replay.to.toFixed(3)},setpts=(PTS-STARTPTS)/${b.replay.speed},scale=${zw}:${zh},crop=${cw}:${ch},setsar=1,${label}[rep]`);
     f.push(`[${mainLabel}][rep]concat=n=2:v=1:a=0[edited0]`);
     mainLabel = 'edited0';
