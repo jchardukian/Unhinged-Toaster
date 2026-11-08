@@ -19,7 +19,7 @@ Output JSON:
  "music": "light" | "none"       // light = quiet comedic bed under the clip; none when the clip's own audio (a scream, a crash, dialogue) must stay clean
 }`;
 
-/** Hook + storytelling rules used with the clean presentation (TEMPLATE_VARIANT=clean) or COPY_STRICT_HOOKS=true. */
+/** Hook + storytelling rules: on with the default (clean) presentation; off with TEMPLATE_VARIANT=classic or COPY_STRICT_HOOKS=false. */
 const HOOK_RULES = `
 Structure every Short as HOOK -> SETUP -> PAYOFF and keep it short:
 - "headline" is the HOOK the viewer reads in the first second: a specific funny contradiction, an absurd observation, a question, or a clear setup for the coming disaster about THIS clip (e.g. "HE THINKS THE LEAVES ARE SOFT", "NOBODY TOLD THE CAT ABOUT GRAVITY"). Not a summary label, not hype.
@@ -29,7 +29,7 @@ Banned anywhere: "Watch as", "Watch this", "Watch how", "You won't believe", "Sp
 
 /** Generic AI openings that read as automated filler (enforced only with the strict hook rules). */
 export const GENERIC_COPY = /\b(watch (as|this|how|what)|you won'?t believe|spoiler( alert)?|takes? an unexpected turn|things take a turn|pure (chaos|joy|comedy)|comedy gold|epic fail|hilarious)\b/i;
-export function strictHooksOn(): boolean { return process.env.TEMPLATE_VARIANT?.trim() === 'clean' || process.env.COPY_STRICT_HOOKS === 'true'; }
+export function strictHooksOn(): boolean { return process.env.COPY_STRICT_HOOKS !== 'false' && process.env.TEMPLATE_VARIANT?.trim() !== 'classic'; }
 
 export async function writeCopy(cfg: Config, c: Candidate, transcript?: string | null, framesJpegBase64?: string): Promise<CopyResult> {
   const strict = strictHooksOn();

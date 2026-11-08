@@ -49,3 +49,12 @@ English-language channel for viewers in the United States.
   muted. `languageGate` rejects before rendering (`rejected_language`, reason recorded) and again in QC on the finished
   file. Footage filmed abroad passes when the gag is universal; nothing is inferred from appearance, ethnicity or accent.
 - QC editorial adds `us_fit` (≥ 6) and natural-American-English checks; failures are never scheduled.
+
+## Presentation (owner decision 2026-11-08: "Adopt B")
+The clean presentation (`template/template.json`) is the default for every new render: footage first (blurred
+footage fill instead of the burst background), Inter Display Black captions with the spoken word in orange at a fixed
+lower-third position, compact headline, commentary as a dark chip under the headline, 150 px mascot only while the
+toaster speaks, small top-left wordmark, thinner animated orange border. Copy follows hook -> setup -> payoff and
+generic openers ("Watch as", "You won't believe", "Spoiler", ...) are rejected. The previous look stays available:
+set the Actions variable `TEMPLATE_VARIANT=classic` (also turns the strict hook rules off). Posts already scheduled
+keep the look they were rendered with. `toaster template-ab --id <candidate>` renders a side-by-side preview.

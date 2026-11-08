@@ -58,7 +58,7 @@ export interface RenderJob {
 
 export interface RenderResult { outPath: string; durationSec: number; thumbnailPath: string; command: string[]; editedClipSec: number }
 
-/** TEMPLATE_VARIANT=<name> selects template/template.<name>.json (e.g. "clean"); unset = template/template.json. */
+/** TEMPLATE_VARIANT=<name> selects template/template.<name>.json (e.g. "classic", the pre-2026-11-08 look); unset = template/template.json (the clean presentation). */
 export function loadTemplate(cfg: Config, variant: string | null = process.env.TEMPLATE_VARIANT?.trim() || null): Template {
   const file = variant ? `template.${variant.replace(/[^a-z0-9_-]/gi, '')}.json` : 'template.json';
   const t = JSON.parse(fs.readFileSync(path.join(cfg.templateDir, file), 'utf8')) as Template;

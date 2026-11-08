@@ -204,7 +204,7 @@ jobs:
           retention-days: 7
 
   # Presentation A/B on real footage from a real runner (Reddit downloads are blocked elsewhere). Renders existing
-  # productions with the live template and template.clean.json, runs QC on both, uploads previews to the control plane
+  # productions with the live template and template.classic.json, runs QC on both, uploads previews to the control plane
   # under previews/ab/. Runs when the push's commit message contains [abprobe]. Nothing is published or scheduled.
   template-ab-probe:
     if: github.event_name == 'push' && contains(github.event.head_commit.message, '[abprobe]')

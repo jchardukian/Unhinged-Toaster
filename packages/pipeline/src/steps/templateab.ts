@@ -12,11 +12,11 @@ import { uploadPublic } from './upload.js';
 
 /**
  * Presentation-only A/B: render ONE existing production twice from the same source, transcript, edit plan, headline and
- * commentary — A with the live template, B with template.<variant>.json — then run the normal QC on both and publish
+ * commentary — A with the live template (template.json), B with template.<variant>.json (default: classic) — then run the normal QC on both and publish
  * the previews plus a side-by-side frame sheet under previews/ab/<candidate>/ on the control plane. Nothing is stored
  * as a production and nothing touches Buffer.
  */
-export async function templateAb(cfg: Config, store: Store, candidateId: string, variant = 'clean'): Promise<string> {
+export async function templateAb(cfg: Config, store: Store, candidateId: string, variant = 'classic'): Promise<string> {
   const c = await store.getCandidate(candidateId);
   if (!c) throw new Error(`candidate ${candidateId} not found`);
   const prod = (await store.listProductions({ candidate_id: candidateId })).sort((a, b) => b.created_at.localeCompare(a.created_at))[0];

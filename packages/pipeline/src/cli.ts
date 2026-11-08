@@ -233,7 +233,7 @@ async function main() {
       const { templateAb } = await import('./steps/templateab.js');
       const ids = String(flags.id ?? '').split(',').map((x) => x.trim()).filter(Boolean);
       if (!ids.length) throw new Error('--id CANDIDATE[,CANDIDATE] required');
-      for (const id of ids) { const md = await templateAb(cfg, store, id, String(flags.variant ?? 'clean')); console.log(md); writeSummary(md); }
+      for (const id of ids) { const md = await templateAb(cfg, store, id, String(flags.variant ?? 'classic')); console.log(md); writeSummary(md); }
       return;
     }
     case 'qc': {

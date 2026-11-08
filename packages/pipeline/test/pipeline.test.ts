@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { buildAss, assColor, isHallucination, maskProfanity, muteWindows } from '../src/steps/captions.js';
 import { isCreatorHandle } from '../src/steps/frames.js';
-import { validate, fallback } from '../src/steps/copy.js';
+import { validate, fallback, strictHooksOn } from '../src/steps/copy.js';
 import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHour, youtubeFetchGuard, ytMetaFromApi, ytViralBucket } from '../src/steps/discover.js';
 import { ytdlpCommonArgs } from '../src/steps/media.js';
 import { postText } from '../src/steps/publish.js';
@@ -249,22 +249,32 @@ test('buildAss word mode: one event per spoken word, only that word in the accen
 
 test('strict hook rules reject generic AI openers; default validation is unchanged', () => {
   const r = { headline: 'He thinks the leaves are soft', commentary: 'That leaf pile has a body count now.', caption: 'Watch as this pup dives into the leaves!', hashtags: ['funny'] };
-  assert.ok(validate(r), 'default mode accepts (live behaviour unchanged)');
+  assert.ok(validate(r), 'the validator alone does not apply the hook rule');
   assert.equal(validate(r, { strictHooks: true }), null, 'strict mode rejects "Watch as"');
   assert.ok(validate({ ...r, caption: 'He committed to the leap. The leaves did not.' }, { strictHooks: true }));
   assert.equal(validate({ ...r, headline: "You won't believe this dog" }, { strictHooks: true }), null);
 });
 
-test('template variants: live default unchanged unless TEMPLATE_VARIANT is set; clean variant is complete', () => {
+test('template variants: clean presentation is the default; classic stays available', () => {
   const root = path.resolve(import.meta.dirname, '..', '..', '..');
   const cfg = { templateDir: path.join(root, 'template'), assetsDir: path.join(root, 'assets') } as unknown as Parameters<typeof loadTemplate>[0];
-  const live = loadTemplate(cfg, null);
-  assert.equal(live.clip.fill, undefined, 'live template keeps the brand burst background');
+  const live = loadTemplate(cfg, 'classic');
+  assert.equal(live.clip.fill, undefined, 'classic keeps the brand burst background');
   assert.equal(live.font, 'fonts/Bangers-Regular.ttf');
-  const clean = loadTemplate(cfg, 'clean');
+  const clean = loadTemplate(cfg, null);
   assert.equal(clean.clip.fill, 'blur');
   assert.equal(clean.captions.highlight, 'word');
   assert.ok(fs.existsSync(path.join(cfg.templateDir, clean.font)), 'clean font is vendored in the repo');
   assert.ok(clean.mascot.width < live.mascot.width && (clean.watermark.wordmarkWidth ?? 0) < (live.watermark.wordmarkWidth ?? 330));
   assert.ok(clean.border!.enabled && clean.border!.px < live.border!.px, 'border kept, thinner');
+});
+
+test('strict hook rules are on by default and off only for the classic template or COPY_STRICT_HOOKS=false', () => {
+  const save = { v: process.env.TEMPLATE_VARIANT, h: process.env.COPY_STRICT_HOOKS };
+  delete process.env.TEMPLATE_VARIANT; delete process.env.COPY_STRICT_HOOKS;
+  assert.equal(strictHooksOn(), true);
+  process.env.TEMPLATE_VARIANT = 'classic'; assert.equal(strictHooksOn(), false);
+  delete process.env.TEMPLATE_VARIANT; process.env.COPY_STRICT_HOOKS = 'false'; assert.equal(strictHooksOn(), false);
+  if (save.v === undefined) delete process.env.TEMPLATE_VARIANT; else process.env.TEMPLATE_VARIANT = save.v;
+  if (save.h === undefined) delete process.env.COPY_STRICT_HOOKS; else process.env.COPY_STRICT_HOOKS = save.h;
 });
