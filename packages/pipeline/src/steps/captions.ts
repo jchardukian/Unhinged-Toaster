@@ -94,6 +94,8 @@ export function isHallucination(text: string, words: Word[]): string | null {
 
 export interface CaptionStyle {
   fontName: string; fontSize: number; marginV: number; primary: string; secondary: string; outline: string; playResX: number; playResY: number;
+  /** 'sweep' (default): karaoke fill; 'word': the spoken word pops in the primary colour, the others stay secondary */
+  highlight?: 'sweep' | 'word'; activeScale?: number; outlineWidth?: number; shadow?: number;
 }
 
 /**
@@ -124,11 +126,27 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Toast,${style.fontName},${style.fontSize},${style.primary},${style.secondary},${style.outline},&H80000000,0,0,0,0,100,100,1,0,1,6,3,2,60,60,${style.marginV},1
+Style: Toast,${style.fontName},${style.fontSize},${style.primary},${style.secondary},${style.outline},&H80000000,0,0,0,0,100,100,1,0,1,${style.outlineWidth ?? 6},${style.shadow ?? 3},2,60,60,${style.marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
+  if (style.highlight === 'word') {
+    // one event per spoken word: the whole phrase stays on screen, the current word pops (accent colour + scale)
+    const sc = Math.round((style.activeScale ?? 1.1) * 100);
+    const ev: string[] = [];
+    for (const ch of chunks) {
+      const chEnd = Math.max(ch[ch.length - 1].end, ch[0].start + 0.35) + 0.08;
+      ch.forEach((w, k) => {
+        const s0 = w.start + offset;
+        const s1 = (k + 1 < ch.length ? ch[k + 1].start : chEnd) + offset;
+        if (s1 <= s0) return;
+        const text = ch.map((x, j) => (j === k ? `{\\c${style.primary}\\fscx${sc}\\fscy${sc}}${clean(x.word)}{\\c${style.secondary}\\fscx100\\fscy100}` : clean(x.word))).join(' ');
+        ev.push(`Dialogue: 0,${ts(s0)},${ts(s1)},Toast,,0,0,0,,{\\c${style.secondary}}${text}`);
+      });
+    }
+    return header + ev.join('\n') + '\n';
+  }
   const lines = chunks.map((ch) => {
     const start = ch[0].start + offset;
     const end = Math.max(ch[ch.length - 1].end, start + 0.35) + offset + 0.08;

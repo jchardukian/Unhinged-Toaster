@@ -9,6 +9,7 @@ import { validate, fallback } from '../src/steps/copy.js';
 import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHour, youtubeFetchGuard, ytMetaFromApi, ytViralBucket } from '../src/steps/discover.js';
 import { ytdlpCommonArgs } from '../src/steps/media.js';
 import { postText } from '../src/steps/publish.js';
+import { loadTemplate } from '../src/steps/render.js';
 import { statsKnown } from '../src/steps/score.js';
 import { deployedWorkerUrl } from '../src/config.js';
 import { JsonStore } from '../src/store.js';
@@ -234,4 +235,36 @@ test('Whisper hallucinations in other languages are not treated as foreign dialo
   assert.equal(isHallucination('Subtítulos por la comunidad de Amara.org', w(6)), 'stock_phrase');
   assert.equal(isHallucination('清單 抖音 抖音', w(3)), 'stock_phrase');
   assert.equal(isHallucination('Untertitel im Auftrag des ZDF', w(5)), 'stock_phrase');
+});
+
+test('buildAss word mode: one event per spoken word, only that word in the accent colour', () => {
+  const words = [{ word: 'he', start: 0, end: 0.3 }, { word: 'thinks', start: 0.35, end: 0.7 }, { word: 'leaves', start: 0.75, end: 1.1 }, { word: 'are', start: 2, end: 2.2 }];
+  const ass = buildAss(words, { fontName: 'Inter Display Black', fontSize: 76, marginV: 560, primary: assColor('#FFB300'), secondary: assColor('#FFFFFF'), outline: assColor('#000000'), playResX: 1080, playResY: 1920, highlight: 'word', activeScale: 1.12, outlineWidth: 7 });
+  const ev = ass.split('\n').filter((l) => l.startsWith('Dialogue:'));
+  assert.equal(ev.length, 4, 'one event per word');
+  assert.match(ev[1], /HE \{\\c&H0000B3FF&?\\fscx112\\fscy112\}THINKS\{/i, 'second word is highlighted while the phrase stays');
+  assert.ok(!/\\kf/.test(ass), 'no karaoke sweep in word mode');
+  assert.match(ass, /Style: Toast,Inter Display Black,76,.*,1,7,3,2,60,60,560,1/);
+});
+
+test('strict hook rules reject generic AI openers; default validation is unchanged', () => {
+  const r = { headline: 'He thinks the leaves are soft', commentary: 'That leaf pile has a body count now.', caption: 'Watch as this pup dives into the leaves!', hashtags: ['funny'] };
+  assert.ok(validate(r), 'default mode accepts (live behaviour unchanged)');
+  assert.equal(validate(r, { strictHooks: true }), null, 'strict mode rejects "Watch as"');
+  assert.ok(validate({ ...r, caption: 'He committed to the leap. The leaves did not.' }, { strictHooks: true }));
+  assert.equal(validate({ ...r, headline: "You won't believe this dog" }, { strictHooks: true }), null);
+});
+
+test('template variants: live default unchanged unless TEMPLATE_VARIANT is set; clean variant is complete', () => {
+  const root = path.resolve(import.meta.dirname, '..', '..', '..');
+  const cfg = { templateDir: path.join(root, 'template'), assetsDir: path.join(root, 'assets') } as unknown as Parameters<typeof loadTemplate>[0];
+  const live = loadTemplate(cfg, null);
+  assert.equal(live.clip.fill, undefined, 'live template keeps the brand burst background');
+  assert.equal(live.font, 'fonts/Bangers-Regular.ttf');
+  const clean = loadTemplate(cfg, 'clean');
+  assert.equal(clean.clip.fill, 'blur');
+  assert.equal(clean.captions.highlight, 'word');
+  assert.ok(fs.existsSync(path.join(cfg.templateDir, clean.font)), 'clean font is vendored in the repo');
+  assert.ok(clean.mascot.width < live.mascot.width && (clean.watermark.wordmarkWidth ?? 0) < (live.watermark.wordmarkWidth ?? 330));
+  assert.ok(clean.border!.enabled && clean.border!.px < live.border!.px, 'border kept, thinner');
 });

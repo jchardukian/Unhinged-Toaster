@@ -202,3 +202,43 @@ jobs:
             work/usage.jsonl
           if-no-files-found: ignore
           retention-days: 7
+
+  # Presentation A/B on real footage from a real runner (Reddit downloads are blocked elsewhere). Renders existing
+  # productions with the live template and template.clean.json, runs QC on both, uploads previews to the control plane
+  # under previews/ab/. Runs when the push's commit message contains [abprobe]. Nothing is published or scheduled.
+  template-ab-probe:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[abprobe]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg python3-pil && pip install -q "yt-dlp[default]"
+      - run: npm ci && npm run build && npm run brand:generate
+      - name: template A/B
+        timeout-minutes: 30
+        env:
+          WORK_DIR: ./work
+          API_BUDGET_USD: '1'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          TOASTER_API_URL: ${{ vars.TOASTER_API_URL || 'https://toaster-api.jchardukian.workers.dev' }}
+          REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
+          TOASTER_API_TOKEN: ${{ secrets.TOASTER_API_TOKEN }}
+          R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL }}
+        run: node packages/pipeline/dist/cli.js template-ab --id 01M6RP37RMNCJVTW1H84FHYYK4,01M6RPAG9GXDGM0SK1DJJ2BJ9Z
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: template-ab
+          path: |
+            work/ab/*/*.mp4
+            work/ab/*/*.jpg
+            work/ab/*/*.json
+          if-no-files-found: ignore
+          retention-days: 7

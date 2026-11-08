@@ -11,16 +11,34 @@ export interface Template {
   font: string;
   assets: Record<string, string>;
   handle: string;
-  headline: { style?: 'text' | 'box'; x: number; y: number; textTop?: number; coverTextTop?: number; boxWidth: number; coverBoxWidth?: number; coverY?: number; maxCharsPerLine: number; maxLines: number; fontSizes: number[]; fill: string; accentFill?: string; outline: string; outlineWidth: number; glow?: string; glowWidth?: number; sideMargin?: number; scaleX?: number; spacing?: number; assSizeFactor?: number };
-  clip: { maxWidth: number; maxHeight: number; coverIfTallerThan?: number; landscapeCenterY?: number; minTop?: number; frameWidth: number; shadowOffset: number };
-  captions: { fontSize: number; bottomPadding: number; coverMarginV?: number; activeColor: string; idleColor: string; outlineColor: string };
-  mascot: { width: number; coverWidth?: number; right: number; bottom: number; bobAmplitude: number; bobSpeed: number };
-  watermark: { logoWidth: number; x: number; y: number; fontSize: number; wordmarkWidth?: number; wordmarkBottom?: number };
-  commentary: { position: 'outro' | 'intro'; introDelay?: number; duckVolume?: number; outroSeconds: number; fontSize: number; boxColor: string; textColor: string; y: number; maxCharsPerLine: number; maxLines?: number };
+  headline: { style?: 'text' | 'box'; x: number; y: number; textTop?: number; coverTextTop?: number; boxWidth: number; coverBoxWidth?: number; coverY?: number; maxCharsPerLine: number; maxLines: number; fontSizes: number[]; fill: string; accentFill?: string; outline: string; outlineWidth: number; glow?: string; glowWidth?: number; sideMargin?: number; scaleX?: number; spacing?: number; assSizeFactor?: number; lineHeight?: number;
+    /** optional font file (relative to the template dir) and its family name, instead of the template font */
+    font?: string; fontName?: string; shadow?: number };
+  clip: { maxWidth: number; maxHeight: number; coverIfTallerThan?: number; landscapeCenterY?: number; minTop?: number; frameWidth: number; shadowOffset: number;
+    /** what fills the canvas around footage that does not cover it: the brand burst (default) or a blurred, darkened copy of the footage */
+    fill?: 'burst' | 'blur';
+    /** landscape only: scale past full width and crop the sides (1 = no crop; 1.12 crops ~5% per side) */
+    landscapeZoom?: number };
+  captions: { fontSize: number; bottomPadding: number; coverMarginV?: number; activeColor: string; idleColor: string; outlineColor: string;
+    font?: string; fontName?: string;
+    /** fixed bottom margin for every layout (consistent placement) instead of "just below the footage" */
+    fixedMarginV?: number;
+    /** 'sweep' (default karaoke fill) or 'word' (the spoken word pops in the accent colour, the rest stays white) */
+    highlight?: 'sweep' | 'word'; activeScale?: number; outlineWidth?: number; shadow?: number; maxWords?: number };
+  mascot: { width: number; coverWidth?: number; right: number; bottom: number; bobAmplitude: number; bobSpeed: number;
+    /** show the mascot only while the toaster "speaks" (commentary window, reaction sticker) */
+    onlyWhileSpeaking?: boolean; top?: number };
+  watermark: { logoWidth: number; x: number; y: number; fontSize: number; wordmarkWidth?: number; wordmarkBottom?: number; position?: 'top' | 'bottom'; wordmarkTop?: number; opacity?: number };
+  commentary: { position: 'outro' | 'intro'; introDelay?: number; duckVolume?: number; outroSeconds: number; fontSize: number; boxColor: string; textColor: string; y: number; maxCharsPerLine: number; maxLines?: number;
+    font?: string; boxAlpha?: number; boxBorder?: number; offsetX?: number;
+    /** place the commentary just under the headline instead of at a fixed y */
+    underHeadline?: boolean };
   audio: { musicVolume: number; musicDuck?: number; voVolume: number; loudnorm: string };
   limits: { maxDurationSec: number };
   /** thin animated neon border with a moving glow (branding); optional */
-  border?: { enabled: boolean; px: number; glowPx: number; colors: string[]; speed: number };
+  border?: { enabled: boolean; px: number; glowPx: number; colors: string[]; speed: number; glowAlpha?: [number, number] };
+  /** sizes of the on-clip edit graphics (defaults = the original template) */
+  effects?: { freezeTextDiv?: number; replayLabelDiv?: number; stickerDiv?: number; stickerBox?: string; stickerText?: string; stickerBorder?: number };
 }
 
 export interface RenderJob {
@@ -40,8 +58,10 @@ export interface RenderJob {
 
 export interface RenderResult { outPath: string; durationSec: number; thumbnailPath: string; command: string[]; editedClipSec: number }
 
-export function loadTemplate(cfg: Config): Template {
-  const t = JSON.parse(fs.readFileSync(path.join(cfg.templateDir, 'template.json'), 'utf8')) as Template;
+/** TEMPLATE_VARIANT=<name> selects template/template.<name>.json (e.g. "clean"); unset = template/template.json. */
+export function loadTemplate(cfg: Config, variant: string | null = process.env.TEMPLATE_VARIANT?.trim() || null): Template {
+  const file = variant ? `template.${variant.replace(/[^a-z0-9_-]/gi, '')}.json` : 'template.json';
+  const t = JSON.parse(fs.readFileSync(path.join(cfg.templateDir, file), 'utf8')) as Template;
   const colorsFile = path.join(cfg.assetsDir, 'brand', 'colors.json');
   if (fs.existsSync(colorsFile)) Object.assign(t.colors, JSON.parse(fs.readFileSync(colorsFile, 'utf8')));
   return t;
@@ -110,18 +130,24 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     preScale = `scale=${cw}:${ch}:flags=lanczos${sharpen}`;
   } else {
     const sc = Math.min(t.clip.maxWidth / probe.width, t.clip.maxHeight / probe.height);
-    cw = even(Math.floor(probe.width * sc));
-    ch = even(Math.floor(probe.height * sc));
+    const zoom = probe.width > probe.height ? Math.max(1, t.clip.landscapeZoom ?? 1) : 1;
+    const sw = even(Math.floor(probe.width * sc * zoom));
+    ch = even(Math.floor(probe.height * sc * zoom));
+    cw = Math.min(sw, even(t.clip.maxWidth));
     cx = Math.round((W - cw) / 2);
     const minTop = t.clip.minTop ?? 440;
     const centerY = t.clip.landscapeCenterY ?? 900;
     cy = Math.max(minTop, Math.min(H - ch - 380, Math.round(centerY - ch / 2)));
-    preScale = `scale=${cw}:${ch}:flags=lanczos${sharpen}`;
+    preScale = `scale=${sw}:${ch}:flags=lanczos${sharpen}${sw > cw ? `,crop=${cw}:${ch}` : ''}`;
   }
-  const fw = cover ? 0 : t.clip.frameWidth, so = t.clip.shadowOffset;
+  const blurFill = t.clip.fill === 'blur';
+  const fullBleed = cover && cw === W && ch === H;
+  const fw = cover || blurFill ? 0 : t.clip.frameWidth, so = t.clip.shadowOffset;
 
   const font = fontPath(cfg, t);
   const fontsDir = path.dirname(font);
+  const fontFor = (f?: string) => (f && fs.existsSync(path.join(cfg.templateDir, f)) ? path.join(cfg.templateDir, f) : font);
+  const headFont = fontFor(t.headline.font), capFont = fontFor(t.captions.font), comFont = fontFor(t.commentary.font);
   const bgLoop = path.join(cfg.assetsDir, t.assets.background_loop);
   const useBgLoop = fs.existsSync(bgLoop);
   const bgStill = useBgLoop ? null : asset(cfg, t, 'background_still');
@@ -133,7 +159,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const inputs: string[] = [];
   let idx = 0;
   const add = (...args: string[]) => { inputs.push(...args); return idx++; };
-  const iBg = useBgLoop ? add('-stream_loop', '-1', '-i', bgLoop) : add('-loop', '1', '-framerate', String(fps), '-i', bgStill!);
+  const iBg = blurFill ? -1 : useBgLoop ? add('-stream_loop', '-1', '-i', bgLoop) : add('-loop', '1', '-framerate', String(fps), '-i', bgStill!);
   const iClip = add('-i', job.clipPath);
   const iMascot = add('-loop', '1', '-i', mascot);
   const iBox = (t.headline.style ?? 'text') === 'box' ? add('-loop', '1', '-i', hbox) : -1;
@@ -153,18 +179,21 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     const words = job.words.filter((w) => w.start < D).map((w) => ({ ...w, word: maskProfanity(w.word), start: tl.map(w.start), end: tl.map(Math.min(w.end, D)) }));
     assFile = path.join(job.workDir, 'captions.ass');
     fs.writeFileSync(assFile, buildAss(words, {
-      fontName: fontFamilyName(font), fontSize: t.captions.fontSize, playResX: W, playResY: H,
-      marginV: cover ? Math.max(t.captions.coverMarginV ?? 470, H - (cy + ch) + t.captions.bottomPadding) : H - (cy + ch) + t.captions.bottomPadding,
+      fontName: t.captions.fontName ?? fontFamilyName(capFont), fontSize: t.captions.fontSize, playResX: W, playResY: H,
+      marginV: t.captions.fixedMarginV ?? (cover ? Math.max(t.captions.coverMarginV ?? 470, H - (cy + ch) + t.captions.bottomPadding) : H - (cy + ch) + t.captions.bottomPadding),
       primary: assColor(t.captions.activeColor), secondary: assColor(t.captions.idleColor), outline: assColor(t.captions.outlineColor),
-    }));
+      highlight: t.captions.highlight, activeScale: t.captions.activeScale, outlineWidth: t.captions.outlineWidth, shadow: t.captions.shadow,
+    }, { maxWords: t.captions.maxWords }));
   }
 
   // ---------- video graph
   const f: string[] = [];
-  if (useBgLoop) f.push(`[${iBg}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${fps},format=rgba[bg0]`);
-  else f.push(`[${iBg}:v]rotate=t*0.10:ow=${W}:oh=${H}:c=black,scale=w=${W}*(1.02+0.02*sin(t*1.3)):h=${H}*(1.02+0.02*sin(t*1.3)):eval=frame,crop=${W}:${H},fps=${fps},format=rgba[bg0]`);
-  if (cover && cw === W && ch === H) f.push('[bg0]null[bg1]');
-  else f.push(`[bg0]drawbox=x=${cx - fw + so}:y=${cy - fw + so}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.black}@0.85:t=fill[bg1]`);
+  if (!blurFill) {
+    if (useBgLoop) f.push(`[${iBg}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${fps},format=rgba[bg0]`);
+    else f.push(`[${iBg}:v]rotate=t*0.10:ow=${W}:oh=${H}:c=black,scale=w=${W}*(1.02+0.02*sin(t*1.3)):h=${H}*(1.02+0.02*sin(t*1.3)):eval=frame,crop=${W}:${H},fps=${fps},format=rgba[bg0]`);
+    if (fullBleed) f.push('[bg0]null[bg1]');
+    else f.push(`[bg0]drawbox=x=${cx - fw + so}:y=${cy - fw + so}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.black}@0.85:t=fill[bg1]`);
+  }
 
   // --- edited clip chain
   f.push(`[${iClip}:v]${preScale},setsar=1,fps=${fps},trim=0:${D.toFixed(3)},setpts=PTS-STARTPTS[c0]`);
@@ -176,7 +205,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   let mainLabel: string;
   if (b.freeze) {
     const tf = b.freeze.at;
-    const freezeTxt = `drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(b.freeze.text)}':fontsize=${Math.round(cw / 9)}:fontcolor=${t.colors.yellow}:borderw=10:bordercolor=${t.colors.black}:x=(w-text_w)/2:y=h*0.72-text_h/2:enable='gte(t,${tf.toFixed(3)})'`;
+    const freezeTxt = `drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(b.freeze.text)}':fontsize=${Math.round(cw / (t.effects?.freezeTextDiv ?? 9))}:fontcolor=${t.colors.yellow}:borderw=10:bordercolor=${t.colors.black}:x=(w-text_w)/2:y=h*0.72-text_h/2:enable='gte(t,${tf.toFixed(3)})'`;
     f.push(`[cA]trim=0:${tf.toFixed(3)},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${b.freeze.duration},${freezeTxt},setsar=1[segA]`);
     f.push(`[cB]trim=${tf.toFixed(3)}:${D.toFixed(3)},setpts=PTS-STARTPTS${punchIn(b, tf, fps, cw, ch)}[segB]`);
     f.push(`[segA][segB]concat=n=2:v=1:a=0[main]`);
@@ -188,7 +217,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   if (b.replay) {
     const z = b.replay.zoom;
     const zw = even(Math.round(cw * z)), zh = even(Math.round(ch * z));
-    const label = `drawtext=fontfile='${esc(font)}':text='REPLAY':fontsize=${Math.round(cw / 16)}:fontcolor=${t.colors.white}:box=1:boxcolor=${t.colors.red}:boxborderw=12:x=28:y=28`;
+    const label = `drawtext=fontfile='${esc(font)}':text='REPLAY':fontsize=${Math.round(cw / (t.effects?.replayLabelDiv ?? 16))}:fontcolor=${t.colors.white}:box=1:boxcolor=${t.colors.red}:boxborderw=12:x=28:y=28`;
     f.push(`[cR]trim=${b.replay.from.toFixed(3)}:${b.replay.to.toFixed(3)},setpts=(PTS-STARTPTS)/${b.replay.speed},scale=${zw}:${zh},crop=${cw}:${ch},setsar=1,${label}[rep]`);
     f.push(`[${mainLabel}][rep]concat=n=2:v=1:a=0[edited0]`);
     mainLabel = 'edited0';
@@ -196,13 +225,23 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const padClip = outro > 0 ? `,tpad=stop_mode=clone:stop_duration=${outro}` : '';
   f.push(`[${mainLabel}]setpts=PTS-STARTPTS${padClip}[clip]`);
 
-  f.push(`[bg1][clip]overlay=x=${cx}:y=${cy}:shortest=0[v1]`);
-  if (cover && cw === W && ch === H) f.push('[v1]null[v2]');
+  if (blurFill && !fullBleed) {
+    // immersive fill: the same (edited) footage, scaled to cover the canvas, blurred at low resolution and darkened
+    f.push(`[clip]split=2[clipfg][clipbg]`);
+    f.push(`[clipbg]scale=${W / 4}:${H / 4}:force_original_aspect_ratio=increase,crop=${W / 4}:${H / 4},boxblur=12:2,eq=brightness=-0.12:saturation=1.15,scale=${W}:${H},setsar=1,format=rgba[bg1]`);
+    f.push(`[bg1][clipfg]overlay=x=${cx}:y=${cy}:shortest=0[v1]`);
+  } else if (blurFill) {
+    f.push(`[clip]null[v1]`);
+  } else {
+    f.push(`[bg1][clip]overlay=x=${cx}:y=${cy}:shortest=0[v1]`);
+  }
+  if (fullBleed || blurFill) f.push('[v1]null[v2]');
   else f.push(`[v1]drawbox=x=${cx - fw}:y=${cy - fw}:w=${cw + 2 * fw}:h=${ch + 2 * fw}:color=${t.colors.yellow}:t=${fw}[v2]`);
 
   // headline: brush-style lettering in the channel-art look (white/yellow letters, black outline, red glow), no box
   const lines = wrapText(job.headline, t.headline.maxCharsPerLine, t.headline.maxLines);
   let cur = 'v2';
+  let headlineBottom = (t.headline.textTop ?? 150) + 200;
   if ((t.headline.style ?? 'text') === 'box') {
     const hboxW = cover ? (t.headline.coverBoxWidth ?? 900) : t.headline.boxWidth;
     const hboxX = Math.round((W - hboxW) / 2);
@@ -227,23 +266,25 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     const scaleX = (t.headline.scaleX ?? 86) / 100;
     const safeW = W - 2 * (t.headline.sideMargin ?? 70) - 2 * glowW0;
     let fsz = t.headline.fontSizes[Math.min(lines.length, t.headline.fontSizes.length) - 1];
-    const widest = Math.max(...lines.map((l) => measureText(font, l, 100) * scaleX));
+    const widest = Math.max(...lines.map((l) => measureText(headFont, l, 100) * scaleX));
     if (widest > 0) fsz = Math.min(fsz, Math.floor((safeW / widest) * 100));
     const textTop = cover ? (t.headline.coverTextTop ?? 120) : (t.headline.textTop ?? 150);
     const headlineAss = path.join(job.workDir, 'headline.ass');
     // ASS font size is a line height, not an em size: scale up so the lettering matches the em-based fit above
+    const headSize = Math.round(fsz * (t.headline.assSizeFactor ?? 1.45));
+    headlineBottom = textTop + Math.round(headSize * (t.headline.lineHeight ?? 0.72)) * lines.length;
     fs.writeFileSync(headlineAss, buildHeadlineAss(lines, {
-      fontName: fontFamilyName(font), fontSize: Math.round(fsz * (t.headline.assSizeFactor ?? 1.45)), scaleX: t.headline.scaleX ?? 86, spacing: t.headline.spacing ?? 1, top: textTop, playResX: W, playResY: H,
+      fontName: t.headline.fontName ?? fontFamilyName(headFont), fontSize: headSize, scaleX: t.headline.scaleX ?? 86, spacing: t.headline.spacing ?? 1, top: textTop, playResX: W, playResY: H,
       fill: t.headline.fill, accentFill: t.headline.accentFill ?? t.headline.fill, outline: t.headline.outline, outlineWidth: t.headline.outlineWidth,
-      glow: t.headline.glow ?? t.colors.red, glowWidth: glowW0, durationSec: total,
+      glow: t.headline.glow ?? t.colors.red, glowWidth: glowW0, durationSec: total, lineHeight: t.headline.lineHeight, shadow: t.headline.shadow,
     }));
-    f.push(`[${cur}]ass='${esc(headlineAss)}':fontsdir='${esc(fontsDir)}'[hl]`);
+    f.push(`[${cur}]ass='${esc(headlineAss)}':fontsdir='${esc(path.dirname(headFont))}'[hl]`);
     cur = 'hl';
   }
 
   // captions
   if (assFile) {
-    f.push(`[${cur}]ass='${esc(assFile)}':fontsdir='${esc(fontsDir)}'[cap]`);
+    f.push(`[${cur}]ass='${esc(assFile)}':fontsdir='${esc(path.dirname(capFont))}'[cap]`);
     cur = 'cap';
   }
 
@@ -251,24 +292,28 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   if (b.sticker) {
     const ts = tl.map(b.sticker.at);
     const te = ts + b.sticker.duration;
-    f.push(`[${cur}]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(b.sticker.text)}':fontsize=${Math.round(W / 7)}:fontcolor=${t.colors.yellow}:borderw=14:bordercolor=${t.colors.black}:box=1:boxcolor=${t.colors.red}@0.92:boxborderw=26:x=(w-text_w)/2:y=${Math.round(cy + ch * 0.30)}:alpha='min(1,(t-${ts.toFixed(3)})*8)':enable='between(t,${ts.toFixed(3)},${te.toFixed(3)})'[stk]`);
+    f.push(`[${cur}]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(b.sticker.text)}':fontsize=${Math.round(W / (t.effects?.stickerDiv ?? 7))}:fontcolor=${t.effects?.stickerText ?? t.colors.yellow}:borderw=${t.effects?.stickerBorder ?? 14}:bordercolor=${t.colors.black}:box=1:boxcolor=${t.effects?.stickerBox ?? `${t.colors.red}@0.92`}:boxborderw=26:x=(w-text_w)/2:y=${Math.round(cy + ch * 0.30)}:alpha='min(1,(t-${ts.toFixed(3)})*8)':enable='between(t,${ts.toFixed(3)},${te.toFixed(3)})'[stk]`);
     cur = 'stk';
   }
 
   // commentary text (outro_voice / text_only); with mode 'none' the clip's own sound carries the ending
   const cLines = mode === 'none' ? [] : wrapText(job.commentary, t.commentary.maxCharsPerLine, t.commentary.maxLines ?? 3);
   const enable = intro ? `between(t,${introStart.toFixed(2)},${introEnd.toFixed(2)})` : outro > 0 ? `gte(t,${editedDur.toFixed(2)})` : `lt(t,${Math.min(editedDur, 3.5).toFixed(2)})`;
+  const comY = t.commentary.underHeadline ? headlineBottom + 40 : t.commentary.y;
+  const comBox = `${t.commentary.boxColor}${t.commentary.boxAlpha !== undefined ? `@${t.commentary.boxAlpha}` : ''}`;
   cLines.forEach((line, i) => {
     const nxt = `c${i}`;
-    f.push(`[${cur}]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(line)}':fontsize=${t.commentary.fontSize}:fontcolor=${t.commentary.textColor}:box=1:boxcolor=${t.commentary.boxColor}:boxborderw=14:x=(w-text_w)/2-120:y=${t.commentary.y + i * Math.round(t.commentary.fontSize * 1.25)}:enable='${enable}'[${nxt}]`);
+    f.push(`[${cur}]drawtext=fontfile='${esc(comFont)}':text='${escapeDrawtext(line)}':fontsize=${t.commentary.fontSize}:fontcolor=${t.commentary.textColor}:box=1:boxcolor=${comBox}:boxborderw=${t.commentary.boxBorder ?? 14}:x=(w-text_w)/2${signed(t.commentary.offsetX ?? -120)}:y=${comY + i * Math.round(t.commentary.fontSize * 1.25 + 2 * Math.max(0, (t.commentary.boxBorder ?? 14) - 14))}:enable='${enable}'[${nxt}]`);
     cur = nxt;
   });
 
   // watermark: the real wordmark when available, else round logo + handle text
   if (iWordmark >= 0) {
     const ww = t.watermark.wordmarkWidth ?? 330;
-    f.push(`[${iWordmark}:v]scale=${ww}:-1[wmark]`);
-    f.push(`[${cur}][wmark]overlay=x=${t.watermark.x}:y=H-h-${t.watermark.wordmarkBottom ?? 28}[wm]`);
+    const op = t.watermark.opacity !== undefined && t.watermark.opacity < 1 ? `,format=rgba,colorchannelmixer=aa=${t.watermark.opacity}` : '';
+    f.push(`[${iWordmark}:v]scale=${ww}:-1${op}[wmark]`);
+    const wy = t.watermark.position === 'top' ? String(t.watermark.wordmarkTop ?? 40) : `H-h-${t.watermark.wordmarkBottom ?? 28}`;
+    f.push(`[${cur}][wmark]overlay=x=${t.watermark.x}:y=${wy}[wm]`);
   } else {
     f.push(`[${iLogo}:v]scale=${t.watermark.logoWidth}:-1[logo]`);
     f.push(`[${cur}][logo]overlay=x=${t.watermark.x}:y=${t.watermark.y}[wm0]`);
@@ -278,14 +323,20 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   // mascot (bobbing); optional "shout" pose while the commentary plays and at the sticker moment
   const mascotW = cover ? (t.mascot.coverWidth ?? 250) : t.mascot.width;
   f.push(`[${iMascot}:v]scale=${mascotW}:-1[masc]`);
+  const stickerWin = b.sticker ? `+between(t,${tl.map(b.sticker.at).toFixed(3)},${(tl.map(b.sticker.at) + b.sticker.duration).toFixed(3)})` : '';
+  const shoutEnable = `(${mode === 'none' ? '0' : intro ? `between(t,${introStart.toFixed(2)},${introEnd.toFixed(2)})` : outro > 0 ? `gte(t,${editedDur.toFixed(2)})` : `lt(t,${Math.min(editedDur, 3.5).toFixed(2)})`}${stickerWin})`;
+  // anchored bottom-right by default; with mascot.top it sits at a fixed y (e.g. beside the commentary)
+  const my = t.mascot.top !== undefined ? (t.commentary.underHeadline ? `${comY - 10}` : `${t.mascot.top}`) : `H-h-${t.mascot.bottom}`;
+  const idleEnable = t.mascot.onlyWhileSpeaking ? `:enable='0'` : `:enable='not(${shoutEnable})'`;
   if (iShout >= 0) {
-    const stickerWin = b.sticker ? `+between(t,${tl.map(b.sticker.at).toFixed(3)},${(tl.map(b.sticker.at) + b.sticker.duration).toFixed(3)})` : '';
-    const shoutEnable = `(${mode === 'none' ? '0' : intro ? `between(t,${introStart.toFixed(2)},${introEnd.toFixed(2)})` : outro > 0 ? `gte(t,${editedDur.toFixed(2)})` : `lt(t,${Math.min(editedDur, 3.5).toFixed(2)})`}${stickerWin})`;
     f.push(`[${iShout}:v]scale=${mascotW}:-1[shout]`);
-    f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame:enable='not(${shoutEnable})'[m1]`);
-    f.push(`[m1][shout]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude * 1.6}*sin(t*${t.mascot.bobSpeed * 2.5}):eval=frame:enable='${shoutEnable}':format=auto,format=yuv420p[vbase]`);
+    if (t.mascot.onlyWhileSpeaking) f.push(`[wm]null[m1]`);
+    else f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=${my}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame${idleEnable}[m1]`);
+    f.push(`[m1][shout]overlay=x=W-w-${t.mascot.right}:y=${my}+${t.mascot.bobAmplitude * 1.6}*sin(t*${t.mascot.bobSpeed * 2.5}):eval=frame:enable='${shoutEnable}':format=auto,format=yuv420p[vbase]`);
+  } else if (t.mascot.onlyWhileSpeaking) {
+    f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=${my}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame:enable='${shoutEnable}':format=auto,format=yuv420p[vbase]`);
   } else {
-    f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=H-h-${t.mascot.bottom}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame:format=auto,format=yuv420p[vbase]`);
+    f.push(`[wm][masc]overlay=x=W-w-${t.mascot.right}:y=${my}+${t.mascot.bobAmplitude}*sin(t*${t.mascot.bobSpeed}):eval=frame:format=auto,format=yuv420p[vbase]`);
   }
   // thin animated neon border + moving glow (branding only): an animated gradient masked to the frame edge, then two
   // translucent inner rings. Drawn over the finished composite, so nothing is rescaled.
@@ -301,7 +352,7 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     f.push(`[grad][edge]alphamerge[ring]`);
     f.push(`[vbase][ring]overlay=x=0:y=0:shortest=1:format=auto[vb1]`);
     const g1 = Math.max(2, Math.round(border.glowPx / 2)), g2 = Math.max(2, Math.round(border.glowPx));
-    f.push(`[vb1]drawbox=x=${bpx}:y=${bpx}:w=${W - 2 * bpx}:h=${H - 2 * bpx}:color=${base}@0.28:t=${g1},drawbox=x=${bpx + g1}:y=${bpx + g1}:w=${W - 2 * (bpx + g1)}:h=${H - 2 * (bpx + g1)}:color=${base}@0.12:t=${g2},format=yuv420p[vout]`);
+    f.push(`[vb1]drawbox=x=${bpx}:y=${bpx}:w=${W - 2 * bpx}:h=${H - 2 * bpx}:color=${base}@${border.glowAlpha?.[0] ?? 0.28}:t=${g1},drawbox=x=${bpx + g1}:y=${bpx + g1}:w=${W - 2 * (bpx + g1)}:h=${H - 2 * (bpx + g1)}:color=${base}@${border.glowAlpha?.[1] ?? 0.12}:t=${g2},format=yuv420p[vout]`);
   } else {
     f.push('[vbase]null[vout]');
   }
@@ -396,9 +447,10 @@ function punchIn(b: EditTimeline['beats'], offset: number, fps: number, cw: numb
 }
 
 const even = (n: number) => (n % 2 ? n - 1 : n);
+const signed = (n: number) => (n === 0 ? '' : n > 0 ? `+${n}` : `${n}`);
 
 /** Two-layer ASS headline: glow layer (fill + outline in the glow colour) under the lettering layer (fill + black outline). */
-function buildHeadlineAss(lines: string[], o: { fontName: string; fontSize: number; scaleX: number; spacing: number; top: number; playResX: number; playResY: number; fill: string; accentFill: string; outline: string; outlineWidth: number; glow: string; glowWidth: number; durationSec: number; lineHeight?: number }): string {
+function buildHeadlineAss(lines: string[], o: { fontName: string; fontSize: number; scaleX: number; spacing: number; top: number; playResX: number; playResY: number; fill: string; accentFill: string; outline: string; outlineWidth: number; glow: string; glowWidth: number; durationSec: number; lineHeight?: number; shadow?: number }): string {
   const end = Math.max(1, o.durationSec + 1);
   const ts = (sec: number) => { const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60); return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.00`; };
   const accent = assColor(o.accentFill);
@@ -419,7 +471,7 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Glow,${o.fontName},${o.fontSize},${assColor(o.glow)},${assColor(o.glow)},${assColor(o.glow)},&H00000000,0,0,0,0,${o.scaleX},100,${o.spacing},0,1,${o.outlineWidth + o.glowWidth},0,8,40,40,${o.top},1
-Style: Head,${o.fontName},${o.fontSize},${assColor(o.fill)},${assColor(o.fill)},${assColor(o.outline)},&H00000000,0,0,0,0,${o.scaleX},100,${o.spacing},0,1,${o.outlineWidth},0,8,40,40,${o.top},1
+Style: Head,${o.fontName},${o.fontSize},${assColor(o.fill)},${assColor(o.fill)},${assColor(o.outline)},${o.shadow ? '&H66000000' : '&H00000000'},0,0,0,0,${o.scaleX},100,${o.spacing},0,1,${o.outlineWidth},${o.shadow ?? 0},8,40,40,${o.top},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -428,16 +480,17 @@ ${events}
 }
 
 /** Text width in px at `size`, from a per-character advance table generated for the font (falls back to 0.55 em). */
-let metricsCache: { size: number; advance: Record<string, number>; default: number } | null | undefined;
+const metricsCache = new Map<string, { size: number; advance: Record<string, number>; default: number } | null>();
 function measureText(fontFile: string, text: string, size: number): number {
-  if (metricsCache === undefined) {
+  if (!metricsCache.has(fontFile)) {
     const mf = fontFile.replace(/\.(ttf|otf)$/i, '-metrics.json');
-    metricsCache = fs.existsSync(mf) ? (JSON.parse(fs.readFileSync(mf, 'utf8')) as { size: number; advance: Record<string, number>; default: number }) : null;
+    metricsCache.set(fontFile, fs.existsSync(mf) ? (JSON.parse(fs.readFileSync(mf, 'utf8')) as { size: number; advance: Record<string, number>; default: number }) : null);
   }
-  if (!metricsCache) return text.length * 0.55 * size;
+  const m = metricsCache.get(fontFile);
+  if (!m) return text.length * 0.55 * size;
   let w = 0;
-  for (const ch of text) w += metricsCache.advance[ch] ?? metricsCache.advance[ch.toUpperCase()] ?? metricsCache.default;
-  return (w / metricsCache.size) * size;
+  for (const ch of text) w += m.advance[ch] ?? m.advance[ch.toUpperCase()] ?? m.default;
+  return (w / m.size) * size;
 }
 const esc = (p: string) => p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
 function fontFamilyName(file: string): string {

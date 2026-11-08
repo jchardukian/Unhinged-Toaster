@@ -45,6 +45,7 @@ Unattended publishing (OFF by default; see docs/AUTONOMY.md)
   incident "TEXT"           record a copyright complaint / platform warning: the monitor pauses unattended publishing
   monitor                   run the health monitor once (publishing errors, QC collapse, breaker, budget, incidents)
   calibration               compare the owner's draft verdicts with the automated QC; says when the gate is trustworthy
+  template-ab --id C1[,C2] [--variant clean]  render existing productions with the live and the alternative template (previews only)
   qc --file VIDEO.mp4       run the quality-control checks on a finished render (technical + editorial)
 
 Daily / weekly automation
@@ -228,6 +229,13 @@ async function main() {
     case 'incident': { const text = String(rest.find((a) => !a.startsWith('--')) ?? flags.text ?? 'incident'); await store.setSetting('incident', { text, at: new Date().toISOString() }); await logDecision(store, { kind: 'pause', production_id: null, candidate_id: null, service: null, slot_at: null, buffer_post_id: null, reasons: JSON.stringify([`incident recorded: ${text}`]), detail: null }); const m = await monitorAutopilot(cfg, store); console.log(JSON.stringify(m)); return; }
     case 'monitor': { const m = await monitorAutopilot(cfg, store); console.log(JSON.stringify(m)); return; }
     case 'calibration': { const r = calibrationReport(await store.listProductions(), await store.listPosts(), cfg.unattendedMinQc); console.log(r.markdown); writeSummary(r.markdown); return; }
+    case 'template-ab': {
+      const { templateAb } = await import('./steps/templateab.js');
+      const ids = String(flags.id ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+      if (!ids.length) throw new Error('--id CANDIDATE[,CANDIDATE] required');
+      for (const id of ids) { const md = await templateAb(cfg, store, id, String(flags.variant ?? 'clean')); console.log(md); writeSummary(md); }
+      return;
+    }
     case 'qc': {
       const file = String(flags.file ?? ''); if (!file) throw new Error('--file required');
       const r = await qualityControl(cfg, { file, candidate: { id: 'manual', safety_flags: '[]', source_url: 'https://example.invalid/src', author: null, rights_status: 'cleared', rights_basis: 'owned' }, headline: String(flags.headline ?? 'QC TEST'), caption: String(flags.caption ?? 'caption'), commentary: flags.commentary ? String(flags.commentary) : undefined, publicText: `caption\n📩 contact`, hashtags: ['funny', 'shorts', 'fails'], words: null, commentaryMode: flags.commentary ? 'outro_voice' : 'none', siblingProductions: 0, editorial: flags['no-editorial'] ? false : true,

@@ -1,0 +1,27 @@
+{
+  "name": "unhinged-toaster-clean",
+  "canvas": { "width": 1080, "height": 1920, "fps": 30 },
+  "colors": { "red": "#E2231A", "black": "#111111", "yellow": "#FFD400", "white": "#FFFFFF" },
+  "font": "fonts/InterDisplay-Black.otf",
+  "assets": {
+    "background_loop": "brand/background_loop.mp4",
+    "background_still": "brand/generated/burst.png",
+    "mascot": "brand/mascot.png",
+    "mascot_fallback": "brand/generated/mascot_placeholder.png",
+    "headline_box": "brand/headline_box.png",
+    "headline_box_fallback": "brand/generated/headline_box_placeholder.png",
+    "logo": "brand/logo.png",
+    "logo_fallback": "brand/generated/logo_placeholder.png"
+  },
+  "handle": "@theunhingedtoaster",
+  "headline": { "style": "text", "fontName": "Inter Display Black", "x": 40, "y": 70, "textTop": 172, "coverTextTop": 172, "boxWidth": 1000, "maxCharsPerLine": 20, "maxLines": 2, "fontSizes": [70, 62], "fill": "#FFFFFF", "accentFill": "#FFB300", "outline": "#000000", "outlineWidth": 6, "shadow": 3, "glow": "#000000", "glowWidth": 0, "sideMargin": 80, "scaleX": 100, "spacing": 0, "assSizeFactor": 1.21, "lineHeight": 0.9 },
+  "clip": { "maxWidth": 1080, "maxHeight": 1920, "coverIfTallerThan": 1440, "landscapeCenterY": 960, "minTop": 0, "frameWidth": 0, "shadowOffset": 0, "fill": "blur", "landscapeZoom": 1.12 },
+  "captions": { "fontName": "Inter Display Black", "fontSize": 76, "bottomPadding": 70, "fixedMarginV": 560, "activeColor": "#FFB300", "idleColor": "#FFFFFF", "outlineColor": "#000000", "highlight": "word", "activeScale": 1.12, "outlineWidth": 7, "shadow": 3, "maxWords": 3 },
+  "mascot": { "width": 150, "coverWidth": 150, "right": 34, "bottom": 10, "top": 0, "bobAmplitude": 6, "bobSpeed": 3, "onlyWhileSpeaking": true },
+  "watermark": { "logoWidth": 72, "x": 40, "y": 40, "fontSize": 44, "wordmarkWidth": 200, "position": "top", "wordmarkTop": 38, "opacity": 0.92 },
+  "commentary": { "position": "intro", "introDelay": 0.35, "duckVolume": 0.25, "outroSeconds": 3.2, "fontSize": 42, "boxColor": "#000000", "boxAlpha": 0.62, "boxBorder": 18, "textColor": "#FFFFFF", "offsetX": 0, "underHeadline": true, "y": 400, "maxCharsPerLine": 26, "maxLines": 3 },
+  "audio": { "musicVolume": 0.10, "musicDuck": 0.35, "voVolume": 1.5, "loudnorm": "I=-14:TP=-1.5:LRA=11" },
+  "limits": { "maxDurationSec": 59 },
+  "border": { "enabled": true, "px": 5, "glowPx": 10, "colors": ["#FF6A00", "#FFB347", "#FF3D00"], "speed": 0.04, "glowAlpha": [0.16, 0.06] },
+  "effects": { "freezeTextDiv": 11, "replayLabelDiv": 24, "stickerDiv": 10, "stickerBox": "#FF6A00@0.92", "stickerText": "#FFFFFF", "stickerBorder": 6 }
+}
