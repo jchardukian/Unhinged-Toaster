@@ -322,7 +322,7 @@ const runStart = Date.now();
 async function syncQuiet(cfg: Config, store: Store): Promise<void> {
   try {
     const r = await syncBuffer(cfg, store, { replace: false });
-    log.info(`buffer sync: ${JSON.stringify({ rejected: r.rejected, errors: r.errors.length })}`);
+    log.info(`buffer sync: ${JSON.stringify({ checked: r.checked, rejected: r.rejected, errors: r.errors.length, first_error: r.errors[0]?.error ?? null })}`);
   } catch (e) { log.warn(`buffer sync failed (continuing): ${(e as Error).message}`); }
 }
 

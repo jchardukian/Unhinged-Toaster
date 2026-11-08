@@ -170,3 +170,29 @@ test('lookupPosts classifies found / not_found / error per alias and throws on t
   const down = new BufferClient({ apiKey: 'k', maxRetries: 0, fetchImpl: async () => new Response('bad gateway', { status: 502 }) });
   await assert.rejects(() => down.lookupPosts(['a'.repeat(24)]), /502/);
 });
+
+test('lookupPosts falls back to per-id lookups when one deleted post fails the whole batch', async () => {
+  const live = 'a'.repeat(24), gone = 'b'.repeat(24);
+  // shape 1: GraphQL null propagation (data: null, error without a usable path); shape 2: HTTP 400 for the batch
+  for (const shape of ['null-data', 'http-400'] as const) {
+    let calls = 0;
+    const c = new BufferClient({
+      apiKey: 'k',
+      maxRetries: 0,
+      fetchImpl: async (_u, init) => {
+        calls++;
+        const vars = JSON.parse(String(init?.body)).variables as Record<string, string>;
+        const ids = Object.values(vars);
+        if (ids.includes(gone)) {
+          if (ids.length > 1 && shape === 'http-400') return new Response(JSON.stringify({ errors: [{ message: 'Post not found' }] }), { status: 400 });
+          return new Response(JSON.stringify({ data: null, errors: [{ message: 'Post not found' }] }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ data: { p0: { id: live, status: 'scheduled', text: '', dueAt: null } } }), { status: 200 });
+      },
+    });
+    const m = await c.lookupPosts([live, gone]);
+    assert.equal(m.get(live)?.status, 'found', `${shape}: live post found`);
+    assert.equal(m.get(gone)?.status, 'not_found', `${shape}: deleted post not_found`);
+    assert.equal(calls, 3, `${shape}: one batch + two single lookups`);
+  }
+});
