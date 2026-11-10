@@ -56,6 +56,23 @@ export interface PublishOptions {
   unattended?: { active: true; minQc: number; reviewDrafts: boolean; fairUse: boolean; decide: (d: Omit<import('@toaster/shared').Decision, 'id' | 'at'>) => Promise<import('@toaster/shared').Decision> };
 }
 
+/**
+ * Slot instants (one per 11/3/7 slot, both services count as one) in the current and next week that are still open:
+ * at least `minLeadHours` away and without a live post. The daily run produces only for these.
+ */
+export async function openSlotInstants(cfg: Config, store: Store, opts: { now?: Date; minLeadHours?: number } = {}): Promise<number> {
+  const now = opts.now ?? new Date();
+  const lead = (opts.minLeadHours ?? 20) * 3600_000;
+  let open = 0;
+  for (const offset of [0, 1]) {
+    const plan = buildWeekPlan(now, cfg.tz, cfg.publishSlots, ['youtube', 'tiktok'], offset);
+    const live = new Set((await store.listPosts({ week: plan.week })).filter((p) => p.state !== 'deleted' && p.buffer_post_id).map((p) => `${p.slot_at}|${p.service}`));
+    const instants = new Set(plan.slots.filter((s) => Date.parse(s.slot_at) - now.getTime() >= lead && !live.has(`${s.slot_at}|${s.service}`)).map((s) => s.slot_at));
+    open += instants.size;
+  }
+  return open;
+}
+
 export interface PublishResult { created: number; adopted: number; skipped: number; failed: number; openSlots: number; weeks: string[] }
 
 /**
