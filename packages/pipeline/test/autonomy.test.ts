@@ -6,7 +6,7 @@ import path from 'node:path';
 import { AUTOPILOT_AUTHORIZATION_PHRASE, BufferClient, buildWeekPlan, type Candidate, type Decision, type Production } from '@toaster/shared';
 import { captionOverlap, captionTimingIssues, editorialGate, parseIntervals, parseLufs, qcScore, score10 } from '../src/steps/qc.js';
 import { calibrationReport, ownerVerdicts } from '../src/steps/calibration.js';
-import { publishWeek } from '../src/steps/publish.js';
+import { openSlotInstants, publishWeek } from '../src/steps/publish.js';
 import { JsonStore } from '../src/store.js';
 import type { Config } from '../src/config.js';
 
@@ -127,4 +127,17 @@ test('unattended publishing schedules only documented-rights + QC-passed product
   const r2 = await publishWeek(c2, store2, { client: new BufferClient({ apiKey: 'k', fetchImpl: fake2.fetch }), now, weeks: ['next'], unattended: { active: true, minQc: 7, reviewDrafts: false, decide: async (d) => ({ id: '01ARZ3NDEKTSV4RRFFQ69G5FAV', at: 'now', ...d }) as Decision } });
   assert.equal(fake2.created.length, 0, 'publish guard refuses without the phrase');
   assert.ok(r2.failed >= 1);
+});
+
+test('openSlotInstants counts open 11/3/7 instants this week and next; a live post closes its slot', async () => {
+  const c = cfg();
+  const store = new JsonStore(path.join(c.workDir, 'db.json'));
+  const now = new Date('2026-11-09T12:00:00Z'); // Monday morning, Chicago
+  const all = await openSlotInstants(c, store, { now, minLeadHours: 2 });
+  assert.ok(all >= 39 && all <= 42, `two weeks of 3 slots/day minus the ones too close: ${all}`);
+  const first = buildWeekPlan(now, c.tz, c.publishSlots, ['youtube', 'tiktok'], 0).slots.map((s) => s.slot_at).filter((t) => Date.parse(t) - now.getTime() >= 2 * 3600_000).sort()[0];
+  for (const service of ['youtube', 'tiktok'] as const) {
+    await store.upsertPost({ id: `P-${service}`, production_id: 'P1', candidate_id: 'C1', content_format: 'general_viral', service, buffer_channel_id: 'x', buffer_post_id: `b-${service}`, slot_at: first, batch_week: buildWeekPlan(now, c.tz, c.publishSlots, ['youtube', 'tiktok'], 0).week, state: 'scheduled', last_synced_at: null, buffer_error: null, views: null, likes: null, comments: null, shares: null, metrics_updated_at: null, created_at: '', updated_at: '', idempotency_key: `k-${service}`, create_attempts: 0, missing_count: 0, missing_since: null, sync_error: null } as never);
+  }
+  assert.equal(await openSlotInstants(c, store, { now, minLeadHours: 2 }), all - 1);
 });

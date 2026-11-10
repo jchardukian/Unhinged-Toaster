@@ -6,7 +6,10 @@ on:
   pull_request:
 
 jobs:
+  # Actions minutes: full tests run on pull requests and on main, not on every push to a working branch
+  # (a branch push that is also a PR would otherwise run them twice). Probe jobs below stay opt-in by commit tag.
   test:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

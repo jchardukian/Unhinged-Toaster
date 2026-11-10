@@ -7,7 +7,7 @@ import { alert } from './alerts.js';
 import { loadConfig, log, repoRoot, type Config } from './config.js';
 import { makeStore, type Store } from './store.js';
 import { discoverAll, youtubeFetchGuard } from './steps/discover.js';
-import { produceCandidate, produceUntil, rescoreUnscored, scoreAll } from './steps/produce.js';
+import { produceCandidate, produceUntil, rescoreUnscored, scoreAll, unpostedProductions } from './steps/produce.js';
 import { runPreflight } from './steps/preflight.js';
 import { runPilot, runSmoke, writeSummary } from './steps/ladder.js';
 import { runDogPilot } from './steps/dogpilot.js';
@@ -17,7 +17,7 @@ import { calibrationReport } from './steps/calibration.js';
 import { qualityControl, qcSummaryLine } from './steps/qc.js';
 import { ensureSfxLibrary } from './steps/sfx.js';
 import { budget, isFatal, setBudget, spentUsd } from './guard.js';
-import { publishWeek } from './steps/publish.js';
+import { openSlotInstants, publishWeek, UNATTENDED_MIN_LEAD_HOURS } from './steps/publish.js';
 import { readinessReport } from './steps/report.js';
 import { fetchProbe, funnelReport } from './steps/funnel.js';
 import { flushUsage } from './usage.js';
@@ -167,21 +167,33 @@ async function main() {
       const pre = await runPreflight(cfg, 'production');
       writeSummary(pre.markdown);
       if (!pre.ok) { console.log(pre.markdown); log.error('preflight failed: the daily run does not start'); process.exitCode = 1; return; }
-      await rescoreUnscored(store);
-      await discoverInto(cfg, store, defaultSources(cfg).split(',').filter(Boolean) as SourceAdapter[], Number(flags.limit ?? 50));
-      await scoreAll(cfg, store);
       // Reconcile with Buffer first (posts deleted there free their slots once confirmed by a second poll >= 10 min
       // later, below). No replacement drafts here: the publish step below fills freed slots through the autopilot gate.
       if (cfg.bufferKey) await syncQuiet(cfg, store);
-      const stock = Number(flags.stock ?? 10);
       const ap = await autopilotStatus(cfg, store);
       const countable = ap.active && !cfg.unattendedReviewDrafts ? async (p: Production) => {
         const c = await store.getCandidate(p.candidate_id);
         return !!c && unattendedEligible(c, p, cfg.unattendedMinQc, { fairUse: cfg.unattendedFairUse }).eligible;
       } : undefined;
+      // Produce only what the schedule needs (GitHub Actions minutes): open slot instants this week and next, plus a
+      // small spare, capped by --stock. A full schedule means no discovery and no rendering today.
+      const open = cfg.bufferKey ? await openSlotInstants(cfg, store, { minLeadHours: ap.active ? UNATTENDED_MIN_LEAD_HOURS : 20 }) : Number(flags.stock ?? 10);
+      const stock = Math.min(Number(flags.stock ?? 10), open + Number(process.env.STOCK_SPARE ?? 2));
+      let ready = 0;
+      for (const p of await unpostedProductions(store)) if (!countable || await countable(p)) ready++;
+      log.info(`schedule: ${open} open slot(s) in the window; ${ready} ready production(s); target stock ${stock}`);
+      if (ready < stock) {
+        await rescoreUnscored(store);
+        const backlog = (await store.listCandidates({ status: ['scored', 'ready'] })).length;
+        // a deep backlog of scored candidates is enough to produce from; discovery (and its LLM scoring) waits
+        if (backlog < Number(process.env.DISCOVERY_MIN_BACKLOG ?? 60)) {
+          await discoverInto(cfg, store, defaultSources(cfg).split(',').filter(Boolean) as SourceAdapter[], Number(flags.limit ?? 50));
+          await scoreAll(cfg, store);
+        } else log.info(`discovery skipped: ${backlog} scored candidates in the backlog`);
+      } else log.info('schedule covered: no discovery or production today');
       // stop starting new productions well before the 100-minute step limit so publishing always runs
       const deadline = runStart + Number(process.env.PRODUCE_BUDGET_MINUTES ?? 70) * 60_000;
-      const have = await produceUntil(cfg, store, stock, { countable, deadline });
+      const have = ready >= stock ? ready : await produceUntil(cfg, store, stock, { countable, deadline });
       let pub = { created: 0, adopted: 0, failed: 0, openSlots: 0 };
       if (cfg.bufferKey) { await syncQuiet(cfg, store); pub = await publishWithAutopilot(cfg, store); }
       await monitorAutopilot(cfg, store);
