@@ -225,6 +225,8 @@ export interface CopyResult {
   hashtags: string[];    // 4-8 tags without '#'
   sticker?: string;      // 1-3 word comic reaction shown at the peak moment ("NOPE.", "WHY.", "OH NO")
   freeze_text?: string;  // short text for the pre-peak freeze frame ("WAIT FOR IT…")
+  rating?: number;       // the toaster's verdict, 1-10 (end-of-video rating card)
+  rating_label?: string; // 1-2 word category for the rating ("CHAOS", "COMMITMENT", "DRAMA")
   edit_style?: 'full' | 'light';  // light = fewer beats (clip is already very short or dialogue-driven)
   commentary_mode?: CommentaryMode; // whether the toaster speaks at all: the clip's own sound is often the joke
   music?: 'light' | 'none';        // light background bed, or none when the clip's own audio must stay clean

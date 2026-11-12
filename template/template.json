@@ -23,5 +23,6 @@
   "audio": { "musicVolume": 0.10, "musicDuck": 0.35, "voVolume": 1.5, "loudnorm": "I=-14:TP=-1.5:LRA=11" },
   "limits": { "maxDurationSec": 59 },
   "border": { "enabled": true, "px": 5, "glowPx": 10, "colors": ["#FF6A00", "#FFB347", "#FF3D00"], "speed": 0.04, "glowAlpha": [0.16, 0.06] },
+  "verdict": { "enabled": true, "seconds": 2.2, "minVideoSec": 6, "y": 700, "titleSize": 40, "scoreSize": 170, "labelSize": 72, "scoreColor": "#FFB300", "title": "TOASTER RATING" },
   "effects": { "freezeTextDiv": 11, "replayLabelDiv": 24, "replayLabelRight": true, "replayLabelY": 44, "stickerDiv": 10, "stickerBox": "#FF6A00@0.92", "stickerText": "#FFFFFF", "stickerBorder": 6 }
 }

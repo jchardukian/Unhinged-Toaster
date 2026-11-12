@@ -154,6 +154,7 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     const sfx = planSfx(cfg, timeline.beats, timeline.map, { category: c.category });
     const r = await withRetry(`render ${c.id}`, () => renderShort(cfg, template, {
       clipPath: src, headline: copy.headline, commentary: copy.commentary, commentaryMode, voPath: vo, words: transcript?.words ?? null,
+      verdict: copy.rating && copy.rating_label ? { rating: copy.rating, label: copy.rating_label } : null,
       musicPath: cfg.musicDefault === 'never' ? null : (copy.music === 'none' && cfg.musicDefault !== 'always') ? null : pickMusic(cfg, c.category), outPath, workDir: dir, timeline, sfx,
     }), { attempts: 2, baseMs: 1000 });
     recordRender((Date.now() - renderStart) / 1000);
