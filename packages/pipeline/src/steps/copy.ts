@@ -14,6 +14,8 @@ Output JSON:
  "hashtags": string[],   // 5-7 tags without '#', mix of broad (funny, fails, shorts) and specific
  "sticker": string,      // 1-3 word comic reaction that pops on screen at the peak moment, e.g. "NOPE.", "WHY.", "OH NO.", "BONK."
  "freeze_text": string,  // 1-4 words shown on a freeze-frame just before the payoff, e.g. "WAIT FOR IT…", "HE HAS NO IDEA"
+ "rating": number,       // the toaster's verdict on THIS clip, integer 1-10 (honest: a weak clip gets a low score; a 10 must be earned)
+ "rating_label": string, // 1-2 words naming what is being rated, specific to the clip, e.g. "CHAOS", "COMMITMENT", "DRAMA", "AIRTIME", "BAD DECISIONS"
  "edit_style": "full" | "light",  // light when the clip is dialogue-driven or the joke needs continuous motion (no freeze, no replay)
  "commentary_mode": "outro_voice" | "text_only" | "none",  // none when the clip's own sound IS the joke (screams, crashes, laughter, dialogue payoff); text_only when a silent on-screen line is funnier than a voice; otherwise outro_voice
  "music": "light" | "none"       // light = quiet comedic bed under the clip; none when the clip's own audio (a scream, a crash, dialogue) must stay clean
@@ -100,10 +102,19 @@ export function validate(r: CopyResult, opts: { strictHooks?: boolean } = {}): C
     hashtags: normaliseHashtags(tags.length ? tags : ['funny', 'shorts', 'fails'], 7),
     sticker: sticker || undefined,
     freeze_text: freeze || undefined,
+    ...ratingOf(r),
     edit_style: r.edit_style === 'light' ? 'light' : 'full',
     commentary_mode: r.commentary_mode === 'none' || r.commentary_mode === 'text_only' ? r.commentary_mode : 'outro_voice',
     music: r.music === 'none' ? 'none' : 'light',
   };
+}
+
+/** The toaster's end-card verdict: integer 1-10 plus a 1-2 word label; anything else is dropped (no card). */
+export function ratingOf(r: Pick<CopyResult, 'rating' | 'rating_label'>): { rating?: number; rating_label?: string } {
+  const n = Math.round(Number(r.rating));
+  const label = cleanShort(r.rating_label, 16).replace(/[.!?]+$/, '');
+  if (!Number.isFinite(n) || n < 1 || n > 10 || !label || label.split(/\s+/).length > 2) return {};
+  return { rating: n, rating_label: label };
 }
 
 function cleanShort(v: unknown, max: number): string {

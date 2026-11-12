@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { buildAss, assColor, isHallucination, maskProfanity, muteWindows } from '../src/steps/captions.js';
 import { isCreatorHandle } from '../src/steps/frames.js';
-import { validate, fallback, strictHooksOn, repairCaption, LABEL_HEADLINE, NARRATION_COMMENTARY } from '../src/steps/copy.js';
+import { validate, fallback, strictHooksOn, repairCaption, ratingOf, LABEL_HEADLINE, NARRATION_COMMENTARY } from '../src/steps/copy.js';
 import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHour, youtubeFetchGuard, ytMetaFromApi, ytViralBucket } from '../src/steps/discover.js';
 import { ytdlpCommonArgs } from '../src/steps/media.js';
 import { postText } from '../src/steps/publish.js';
@@ -299,4 +299,14 @@ test('repairCaption never publishes a generic opener', () => {
   assert.equal(repairCaption('Watch as first responders turn off their siren.', 'FIRST RESPONDERS MUTED THE SIREN FOR HER'), 'First responders muted the siren for her.');
   assert.equal(repairCaption('He committed. The pumpkin did not.', 'X'), 'He committed. The pumpkin did not.');
   assert.equal(repairCaption('Watch this kitten shut down.', 'KITTEN SHUTTING DOWN IN 3... 2... 1...'), 'Kitten shutting down in 3... 2... 1...');
+});
+
+test('toaster verdict: integer 1-10 with a 1-2 word label, otherwise no card', () => {
+  assert.deepEqual(ratingOf({ rating: 9, rating_label: 'commitment' }), { rating: 9, rating_label: 'COMMITMENT' });
+  assert.deepEqual(ratingOf({ rating: 7.6, rating_label: 'BAD DECISIONS!' }), { rating: 8, rating_label: 'BAD DECISIONS' });
+  assert.deepEqual(ratingOf({ rating: 11, rating_label: 'CHAOS' }), {});
+  assert.deepEqual(ratingOf({ rating: 5, rating_label: 'way too many words here' }), {});
+  assert.deepEqual(ratingOf({ rating: undefined, rating_label: 'CHAOS' }), {});
+  const v = validate({ headline: 'HE THINKS THE LEAVES ARE SOFT', commentary: 'Ten out of ten, would malfunction again.', caption: 'He committed.', hashtags: ['funny'], rating: 9, rating_label: 'airtime' });
+  assert.equal(v?.rating, 9); assert.equal(v?.rating_label, 'AIRTIME');
 });

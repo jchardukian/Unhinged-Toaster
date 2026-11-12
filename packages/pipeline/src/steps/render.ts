@@ -37,6 +37,8 @@ export interface Template {
   limits: { maxDurationSec: number };
   /** thin animated neon border with a moving glow (branding); optional */
   border?: { enabled: boolean; px: number; glowPx: number; colors: string[]; speed: number; glowAlpha?: [number, number] };
+  /** the toaster's rating card over the final seconds (an original verdict on every clip); optional */
+  verdict?: { enabled: boolean; seconds: number; minVideoSec?: number; y: number; scoreSize: number; labelSize: number; titleSize: number; scoreColor: string; title?: string };
   /** sizes of the on-clip edit graphics (defaults = the original template) */
   effects?: { freezeTextDiv?: number; replayLabelDiv?: number; replayLabelRight?: boolean; replayLabelY?: number; stickerDiv?: number; stickerBox?: string; stickerText?: string; stickerBorder?: number };
 }
@@ -52,6 +54,8 @@ export interface RenderJob {
   outPath: string;
   workDir: string;
   timeline?: EditTimeline;        // clip-specific comedic edit plan (optional: plain template when absent)
+  /** the toaster's verdict for the end card ("9/10" + label); shown when the template enables it */
+  verdict?: { rating: number; label: string } | null;
   /** comedic sound effects, placed on the EDITED timeline (seconds), mixed over everything else */
   sfx?: { path: string; at: number; gain?: number }[];
 }
@@ -307,6 +311,18 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
     cur = nxt;
   });
 
+  // verdict card: the toaster's rating over the last seconds of the video (no extra length; it sits on the payoff / replay)
+  const vt = t.verdict?.enabled && job.verdict && total >= (t.verdict.minVideoSec ?? 6) ? t.verdict : null;
+  const vStart = vt ? Math.max(total * 0.5, total - vt.seconds) : 0;
+  if (vt && job.verdict) {
+    const fade = `alpha='min(1,(t-${vStart.toFixed(3)})*6)':enable='gte(t,${vStart.toFixed(3)})'`;
+    const title = escapeDrawtext(vt.title ?? 'TOASTER RATING');
+    f.push(`[${cur}]drawtext=fontfile='${esc(font)}':text='${title}':fontsize=${vt.titleSize}:fontcolor=${t.colors.white}:box=1:boxcolor=${t.colors.black}@0.6:boxborderw=14:x=(w-text_w)/2:y=${vt.y}:${fade}[vd0]`);
+    f.push(`[vd0]drawtext=fontfile='${esc(font)}':text='${job.verdict.rating}/10':fontsize=${vt.scoreSize}:fontcolor=${vt.scoreColor}:borderw=10:bordercolor=${t.colors.black}:x=(w-text_w)/2:y=${vt.y + vt.titleSize + 40}:${fade}[vd1]`);
+    f.push(`[vd1]drawtext=fontfile='${esc(font)}':text='${escapeDrawtext(job.verdict.label)}':fontsize=${vt.labelSize}:fontcolor=${t.colors.white}:borderw=7:bordercolor=${t.colors.black}:x=(w-text_w)/2:y=${vt.y + vt.titleSize + 40 + Math.round(vt.scoreSize * 1.05)}:${fade}[vd2]`);
+    cur = 'vd2';
+  }
+
   // watermark: the real wordmark when available, else round logo + handle text
   if (iWordmark >= 0) {
     const ww = t.watermark.wordmarkWidth ?? 330;
@@ -324,7 +340,8 @@ export async function renderShort(cfg: Config, t: Template, job: RenderJob): Pro
   const mascotW = cover ? (t.mascot.coverWidth ?? 250) : t.mascot.width;
   f.push(`[${iMascot}:v]scale=${mascotW}:-1[masc]`);
   const stickerWin = b.sticker ? `+between(t,${tl.map(b.sticker.at).toFixed(3)},${(tl.map(b.sticker.at) + b.sticker.duration).toFixed(3)})` : '';
-  const shoutEnable = `(${mode === 'none' ? '0' : intro ? `between(t,${introStart.toFixed(2)},${introEnd.toFixed(2)})` : outro > 0 ? `gte(t,${editedDur.toFixed(2)})` : `lt(t,${Math.min(editedDur, 3.5).toFixed(2)})`}${stickerWin})`;
+  const verdictWin = vt ? `+gte(t,${vStart.toFixed(3)})` : '';
+  const shoutEnable = `(${mode === 'none' ? '0' : intro ? `between(t,${introStart.toFixed(2)},${introEnd.toFixed(2)})` : outro > 0 ? `gte(t,${editedDur.toFixed(2)})` : `lt(t,${Math.min(editedDur, 3.5).toFixed(2)})`}${stickerWin}${verdictWin})`;
   // anchored bottom-right by default; with mascot.top it sits at a fixed y (e.g. beside the commentary)
   const my = t.mascot.top !== undefined ? (t.commentary.underHeadline ? `${comY - 10}` : `${t.mascot.top}`) : `H-h-${t.mascot.bottom}`;
   const idleEnable = t.mascot.onlyWhileSpeaking ? `:enable='0'` : `:enable='not(${shoutEnable})'`;
