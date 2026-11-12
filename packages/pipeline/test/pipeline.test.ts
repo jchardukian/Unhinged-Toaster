@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { buildAss, assColor, isHallucination, maskProfanity, muteWindows } from '../src/steps/captions.js';
 import { isCreatorHandle } from '../src/steps/frames.js';
-import { validate, fallback, strictHooksOn } from '../src/steps/copy.js';
+import { validate, fallback, strictHooksOn, repairCaption, LABEL_HEADLINE, NARRATION_COMMENTARY } from '../src/steps/copy.js';
 import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHour, youtubeFetchGuard, ytMetaFromApi, ytViralBucket } from '../src/steps/discover.js';
 import { ytdlpCommonArgs } from '../src/steps/media.js';
 import { postText } from '../src/steps/publish.js';
@@ -277,4 +277,26 @@ test('strict hook rules are on by default and off only for the classic template 
   delete process.env.TEMPLATE_VARIANT; process.env.COPY_STRICT_HOOKS = 'false'; assert.equal(strictHooksOn(), false);
   if (save.v === undefined) delete process.env.TEMPLATE_VARIANT; else process.env.TEMPLATE_VARIANT = save.v;
   if (save.h === undefined) delete process.env.COPY_STRICT_HOOKS; else process.env.COPY_STRICT_HOOKS = save.h;
+});
+
+test('deep dive 2026-11-12: label headlines and narrating commentary are rejected under the hook rules', () => {
+  const ok = { headline: "THE TOY WASN'T READY FOR THIS", commentary: "I've burned toast with more commitment than that jump.", caption: 'He committed. The pumpkin did not.', hashtags: ['funny'] };
+  assert.ok(validate(ok, { strictHooks: true }));
+  for (const h of ['LLAMA ZOOMIES IN ACTION!', 'CUTE PUPPY ALERT!', 'KIDS SHOWING RESPECT? YES, PLEASE!', 'DOGGO TREAT TIME!', 'WATER BOTTLE MAYHEM!']) {
+    assert.ok(LABEL_HEADLINE.test(h), h);
+    assert.equal(validate({ ...ok, headline: h }, { strictHooks: true }), null, h);
+  }
+  for (const h of ['KITTEN SHUTTING DOWN IN 3... 2... 1...', 'HE THINKS THE LEAVES ARE SOFT', 'NOBODY TOLD THE CAT ABOUT GRAVITY']) assert.ok(!LABEL_HEADLINE.test(h), h);
+  for (const c of ['Look at those fluffy speedsters go!', 'This little guy is really trying to break free!', 'Check out this pup!']) {
+    assert.ok(NARRATION_COMMENTARY.test(c), c);
+    assert.equal(validate({ ...ok, commentary: c }, { strictHooks: true }), null, c);
+  }
+  assert.ok(validate({ ...ok, headline: 'LLAMA ZOOMIES IN ACTION!' }), 'the validator alone (classic template) is unchanged');
+});
+
+test('repairCaption never publishes a generic opener', () => {
+  assert.equal(repairCaption('Watch this pup dive into the leaves! The leaves lost.', 'X'), 'The leaves lost.');
+  assert.equal(repairCaption('Watch as first responders turn off their siren.', 'FIRST RESPONDERS MUTED THE SIREN FOR HER'), 'First responders muted the siren for her.');
+  assert.equal(repairCaption('He committed. The pumpkin did not.', 'X'), 'He committed. The pumpkin did not.');
+  assert.equal(repairCaption('Watch this kitten shut down.', 'KITTEN SHUTTING DOWN IN 3... 2... 1...'), 'Kitten shutting down in 3... 2... 1...');
 });

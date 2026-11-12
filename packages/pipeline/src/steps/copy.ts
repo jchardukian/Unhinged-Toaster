@@ -22,13 +22,31 @@ Output JSON:
 /** Hook + storytelling rules: on with the default (clean) presentation; off with TEMPLATE_VARIANT=classic or COPY_STRICT_HOOKS=false. */
 const HOOK_RULES = `
 Structure every Short as HOOK -> SETUP -> PAYOFF and keep it short:
-- "headline" is the HOOK the viewer reads in the first second: a specific funny contradiction, an absurd observation, a question, or a clear setup for the coming disaster about THIS clip (e.g. "HE THINKS THE LEAVES ARE SOFT", "NOBODY TOLD THE CAT ABOUT GRAVITY"). Not a summary label, not hype.
-- "commentary" is the toaster's ORIGINAL joke or opinion: something the viewer cannot see for themselves (a comparison, a judgment, a toaster's point of view). Never narrate what is on screen.
+- "headline" is the HOOK the viewer reads in the first second, and it decides whether they swipe. Build suspense or curiosity about what is ABOUT to happen and never give the outcome away: a countdown, a setup for the coming disaster, a funny contradiction, a question (e.g. "KITTEN SHUTTING DOWN IN 3... 2... 1...", "THE TOY WASN'T READY FOR THIS", "HE THINKS THE LEAVES ARE SOFT", "NOBODY TOLD THE CAT ABOUT GRAVITY"). Never a topic label: no "<THING> IN ACTION", "CUTE <X> ALERT", "<X> TIME!", "<X> MAYHEM/MADNESS/SHENANIGANS/SPECTACULAR", "YES, PLEASE".
+- "commentary" is the toaster's ORIGINAL take: a verdict, a comparison, a judgment or a toaster's point of view that the viewer cannot see for themselves (e.g. "I've burned toast with more commitment than that jump.", "Ten out of ten, would malfunction again."). Never narrate or describe what is on screen; never start with "Look at", "Watch", "Check out", "This little...", "These...". Original commentary is what makes a clip channel worth recommending.
 - "caption" reads like a person, not an announcer.
 Banned anywhere: "Watch as", "Watch this", "Watch how", "You won't believe", "Spoiler", "takes an unexpected turn", "Things take a turn", "Wait for it" (except freeze_text), "pure chaos", "comedy gold", "epic", "hilarious".`;
 
 /** Generic AI openings that read as automated filler (enforced only with the strict hook rules). */
 export const GENERIC_COPY = /\b(watch (as|this|how|what)|you won'?t believe|spoiler( alert)?|takes? an unexpected turn|things take a turn|pure (chaos|joy|comedy)|comedy gold|epic fail|hilarious)\b/i;
+/** Topic-label headlines (no curiosity) that underperformed in the first week of data (deep dive 2026-11-12). */
+export const LABEL_HEADLINE = /\b(in action|alert|yes,? please|mayhem|madness|shenanigans|spectacular|unleashed)\b|\b\w+ time!*$/i;
+/** Commentary that narrates the clip instead of adding the toaster's own take. */
+export const NARRATION_COMMENTARY = /^(look at|watch|check out|here('s| is| comes)|this (little|guy|girl|dog|cat|pup|puppy|kitten|bird|baby)|these|those)\b/i;
+
+/**
+ * A caption that still opens generically after the retry is repaired, never published as is: drop the generic sentence
+ * when another sentence remains, otherwise fall back to the clip's own hook headline in sentence case.
+ */
+export function repairCaption(caption: string, headline: string): string {
+  if (!GENERIC_COPY.test(caption)) return caption;
+  const sentences = caption.match(/[^.!?]+[.!?]*\s*/g)?.map((x) => x.trim()).filter(Boolean) ?? [];
+  const kept = sentences.filter((x) => !GENERIC_COPY.test(x));
+  if (kept.length) return kept.join(' ');
+  const h = headline.trim().toLowerCase().replace(/(^|[.!?]\s+)([a-z])/g, (_m, p: string, c: string) => p + c.toUpperCase());
+  return /[.!?…]$/.test(h) ? h : `${h}.`;
+}
+
 export function strictHooksOn(): boolean { return process.env.COPY_STRICT_HOOKS !== 'false' && process.env.TEMPLATE_VARIANT?.trim() !== 'classic'; }
 
 export async function writeCopy(cfg: Config, c: Candidate, transcript?: string | null, framesJpegBase64?: string): Promise<CopyResult> {
@@ -41,10 +59,10 @@ export async function writeCopy(cfg: Config, c: Candidate, transcript?: string |
     const out = validate(r, { strictHooks: strict });
     if (out) return out;
     log.warn(`copy failed validation for ${c.id} (empty, slur, British, or generic opener), retrying once with the clip context`);
-    const r2 = await chatJson<CopyResult>(cfg, system + '\nYour previous attempt was rejected (empty, offensive, not natural American English, or a generic opener like "Watch as"). Keep it clean, American, specific to the clip, and open with a real hook.', JSON.stringify({ original_title: c.title, visual_summary: c.visual_summary ?? null, category: c.category, transcript: transcript?.slice(0, 400) ?? null }), { temperature: 0.6, maxTokens: 350, imageJpegBase64: framesJpegBase64 });
+    const r2 = await chatJson<CopyResult>(cfg, system + '\nYour previous attempt was rejected (empty, offensive, not natural American English, a generic opener like "Watch as", a topic-label headline like "LLAMA ZOOMIES IN ACTION!", or commentary that narrates the clip). Keep it clean, American and specific: a suspense hook headline that does not give the outcome away, and a toaster verdict or joke the viewer cannot see for themselves.', JSON.stringify({ original_title: c.title, visual_summary: c.visual_summary ?? null, category: c.category, transcript: transcript?.slice(0, 400) ?? null }), { temperature: 0.6, maxTokens: 350, imageJpegBase64: framesJpegBase64 });
     // a still-generic retry beats the per-category fallback (which is unrelated to the clip), so the retry is judged without the hook rule
     const out2 = validate(r2, { strictHooks: strict }) ?? (strict ? validate(r2) : null);
-    if (out2) return out2;
+    if (out2) return strict ? { ...out2, caption: repairCaption(out2.caption, out2.headline) } : out2;
   } catch (e) {
     log.warn(`copywriter LLM failed for ${c.id}: ${(e as Error).message}`);
   }
@@ -73,6 +91,7 @@ export function validate(r: CopyResult, opts: { strictHooks?: boolean } = {}): C
   headline = americanize(headline); commentary = americanize(commentary);
   if (UK_SLANG.test(headline) || UK_SLANG.test(commentary) || UK_SLANG.test(caption)) return null;
   if (opts.strictHooks && (GENERIC_COPY.test(headline) || GENERIC_COPY.test(commentary) || GENERIC_COPY.test(caption))) return null;
+  if (opts.strictHooks && (LABEL_HEADLINE.test(headline) || NARRATION_COMMENTARY.test(commentary))) return null;
   const tags = (Array.isArray(r.hashtags) ? r.hashtags : ['funny', 'shorts', 'fails']).map((t) => americanize(String(t))).filter((t) => /^[#A-Za-z0-9_]+$/.test(t.replace(/\s/g, '')));
   return {
     headline,
