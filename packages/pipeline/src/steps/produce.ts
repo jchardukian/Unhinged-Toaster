@@ -5,7 +5,7 @@ import { analyzeClip } from './analyze.js';
 import { contactSheet, readWatermark, sheetBase64, sheetPathFor } from './frames.js';
 import { log, type Config } from '../config.js';
 import type { Store } from '../store.js';
-import { transcribe, transcribeDetailed } from './captions.js';
+import { musicSuspect, transcribe, transcribeDetailed } from './captions.js';
 import { writeCopy } from './copy.js';
 import { downloadMedia, extractAudio, ffprobe, mediaDuration, videoPhash } from './media.js';
 import { loadTemplate, pickMusic, renderShort } from './render.js';
@@ -92,7 +92,10 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     // transcript (for captions + better copy); fine if absent
     const audio = await extractAudio(src, path.join(dir, 'audio.mp3'));
     const speech = audio ? await transcribeDetailed(cfg, audio) : null;
-    const transcript = speech?.transcript ?? null;
+    // a song in the source (Content ID): mute the source audio and never caption lyrics
+    const music = musicSuspect(speech);
+    if (music) log.info(`music suspected in ${c.id} (${music}): source audio will be muted`);
+    const transcript = music ? null : speech?.transcript ?? null;
     const speechInfo = speech && speech.wordCount > 0 ? { language: speech.language, words: speech.wordCount, excerpt: speech.text.slice(0, 300) } : null;
 
     // vision pass: contact sheet -> re-score with frames (detects watermarks / real creator, grounds the copy in what happens)
@@ -130,7 +133,12 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     // clip-specific edit plan: detected peak moment -> freeze / punch-in / replay / sticker
     const template = loadTemplate(cfg);
     const analysis = await analyzeClip(src);
-    const flags = (JSON.parse(c.safety_flags ?? '[]') as string[]);
+    let flags = (JSON.parse(c.safety_flags ?? '[]') as string[]);
+    if (music && !flags.includes('copyrighted_music')) {
+      flags = [...flags, 'copyrighted_music'];
+      c = { ...c, safety_flags: JSON.stringify(flags) };
+      await store.patchCandidate(c.id, { safety_flags: c.safety_flags });
+    }
     const muteSource = flags.includes('copyrighted_music');
     const voDur = vo ? (await mediaDuration(vo)) ?? 3 : 0;
     const outroSec = commentaryMode === 'none' || template.commentary.position === 'intro' ? 0 : Math.max(template.commentary.outroSeconds, voDur + 0.5);

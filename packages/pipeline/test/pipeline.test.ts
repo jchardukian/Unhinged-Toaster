@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildAss, assColor, isHallucination, maskProfanity, muteWindows } from '../src/steps/captions.js';
+import { buildAss, assColor, isHallucination, maskProfanity, musicSuspect, muteWindows } from '../src/steps/captions.js';
 import { isCreatorHandle } from '../src/steps/frames.js';
 import { validate, fallback, strictHooksOn, repairCaption, ratingOf, LABEL_HEADLINE, NARRATION_COMMENTARY } from '../src/steps/copy.js';
 import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHour, youtubeFetchGuard, ytMetaFromApi, ytViralBucket } from '../src/steps/discover.js';
@@ -309,4 +309,12 @@ test('toaster verdict: integer 1-10 with a 1-2 word label, otherwise no card', (
   assert.deepEqual(ratingOf({ rating: undefined, rating_label: 'CHAOS' }), {});
   const v = validate({ headline: 'HE THINKS THE LEAVES ARE SOFT', commentary: 'Ten out of ten, would malfunction again.', caption: 'He committed.', hashtags: ['funny'], rating: 9, rating_label: 'airtime' });
   assert.equal(v?.rating, 9); assert.equal(v?.rating_label, 'AIRTIME');
+});
+
+test('musicSuspect: music notes, [Music] tags or a repetitive sung chorus mean a song is in the source', () => {
+  assert.equal(musicSuspect({ text: '\u266A \u266A \u266A', discarded: 'no_letters', wordCount: 0 }), 'music_notes');
+  assert.equal(musicSuspect({ text: '[Music]', discarded: 'stock_phrase', wordCount: 0 }), 'music_tag');
+  assert.equal(musicSuspect({ text: "don't stay awake for too long don't go to bed don't stay awake for too long don't go to bed", discarded: 'repetitive', wordCount: 0 }), 'repetitive_lyrics');
+  assert.equal(musicSuspect({ text: 'oh my god he actually jumped into the pool', discarded: null, wordCount: 9 }), null);
+  assert.equal(musicSuspect(null), null);
 });
