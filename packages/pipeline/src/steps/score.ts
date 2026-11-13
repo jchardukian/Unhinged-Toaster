@@ -21,6 +21,8 @@ Pick category from: ${CONTENT_CATEGORIES.join(', ')}.
 safety_flags (array, possibly empty) from: nsfw, hate, graphic_injury, mild_injury, death, animal_cruelty, self_harm,
 minor_humiliation (a child being mocked), minor_visible, private_person_mocking (laughing AT a non-public person in a humiliating way),
 copyrighted_music, profanity, brand_logos, political, dangerous_stunt_imitable.
+Flag copyrighted_music whenever a song plays in the clip: the transcript reads like sung lyrics (rhymes, a repeated chorus),
+the title/description names a song or trend sound, or the clip looks like a lip-sync/trend edit set to music.
 Be strict with safety. rationale: one sentence. Respond with a single JSON object containing all fields.
 Also assess copyright_risk for reusing this footage in a transformed commentary short WITHOUT a license from the owner:
 - "high": professional/broadcast/TV/film/sports-league/news-agency footage, music videos, clips with a prominent commercial music track as the point, stock-agency watermarks, footage from another commentary/compilation channel, or any indication the poster is not the person who filmed it

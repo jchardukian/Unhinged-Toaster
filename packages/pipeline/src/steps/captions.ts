@@ -92,6 +92,20 @@ export function isHallucination(text: string, words: Word[]): string | null {
   return null;
 }
 
+/**
+ * Background music signals in what Whisper heard (2026-11-13: a Content ID claim for a pop song in a dog clip).
+ * Whisper writes music as note symbols or "[Music]", and a sung chorus comes out highly repetitive. Any of these
+ * means the clip carries a song: the source audio is muted and no lyrics are captioned.
+ */
+export function musicSuspect(speech: Pick<SpeechInfo, 'text' | 'discarded' | 'wordCount'> | null): string | null {
+  if (!speech) return null;
+  const t = speech.text ?? '';
+  if (/[\u266A\u266B\u{1F3B5}\u{1F3B6}]/u.test(t)) return 'music_notes';
+  if (/[[(](music|singing|song|instrumental)[\])]/i.test(t)) return 'music_tag';
+  if (speech.discarded === 'repetitive' && t.trim().split(/\s+/).length >= 8) return 'repetitive_lyrics';
+  return null;
+}
+
 export interface CaptionStyle {
   fontName: string; fontSize: number; marginV: number; primary: string; secondary: string; outline: string; playResX: number; playResY: number;
   /** 'sweep' (default): karaoke fill; 'word': the spoken word pops in the primary colour, the others stay secondary */
