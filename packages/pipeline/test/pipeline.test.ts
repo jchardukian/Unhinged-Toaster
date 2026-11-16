@@ -10,6 +10,7 @@ import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHou
 import { ytdlpCommonArgs } from '../src/steps/media.js';
 import { postText } from '../src/steps/publish.js';
 import { loadTemplate } from '../src/steps/render.js';
+import { leadInTrim } from '../src/steps/analyze.js';
 import { statsKnown } from '../src/steps/score.js';
 import { deployedWorkerUrl } from '../src/config.js';
 import { JsonStore } from '../src/store.js';
@@ -317,4 +318,23 @@ test('musicSuspect: music notes, [Music] tags or a repetitive sung chorus mean a
   assert.equal(musicSuspect({ text: "don't stay awake for too long don't go to bed don't stay awake for too long don't go to bed", discarded: 'repetitive', wordCount: 0 }), 'repetitive_lyrics');
   assert.equal(musicSuspect({ text: 'oh my god he actually jumped into the pool', discarded: null, wordCount: 9 }), null);
   assert.equal(musicSuspect(null), null);
+});
+
+test('leadInTrim: trims a still, quiet opening; never cuts setup, motion-from-frame-0 or short clips', () => {
+  const frames = (fn: (t: number) => number, dur = 20) => Array.from({ length: dur * 30 }, (_, i) => ({ t: i / 30, score: fn(i / 30) }));
+  const audio = (fn: (t: number) => number, dur = 20) => Array.from({ length: dur * 10 }, (_, i) => ({ t: i / 10, db: fn(i / 10) }));
+  const base = { duration: 20, loudnessDb: -25, peak: { t: 12, method: 'x' } };
+  // 2 s still + silent, then motion and sound -> trim to ~0.5 s before the motion (window looks ahead)
+  const still = leadInTrim({ ...base, sceneScores: frames((t) => (t < 2 ? 0.001 : 0.03)), audioRms: audio((t) => (t < 2 ? -70 : -22)) });
+  assert.ok(still > 1.2 && still < 2, String(still));
+  // motion from the first frame -> no trim
+  assert.equal(leadInTrim({ ...base, sceneScores: frames(() => 0.03), audioRms: audio((t) => (t < 2 ? -70 : -22)) }), 0);
+  // talking from the start (setup dialogue) -> no trim
+  assert.equal(leadInTrim({ ...base, sceneScores: frames((t) => (t < 2 ? 0.001 : 0.03)), audioRms: audio(() => -24) }), 0);
+  // long dead opening is capped at 3 s
+  assert.ok(leadInTrim({ ...base, sceneScores: frames((t) => (t < 6 ? 0.001 : 0.03)), audioRms: audio((t) => (t < 6 ? -70 : -22)) }) <= 3);
+  // an early peak keeps 1 s before it: peak at 1.5 s -> at most 0.5 s, under the minimum -> 0
+  assert.equal(leadInTrim({ ...base, peak: { t: 1.5, method: 'x' }, sceneScores: frames((t) => (t < 2 ? 0.001 : 0.03)), audioRms: audio((t) => (t < 2 ? -70 : -22)) }), 0);
+  // short clip keeps at least 6 s
+  assert.equal(leadInTrim({ ...base, duration: 6.5, peak: null, sceneScores: frames((t) => (t < 2 ? 0.001 : 0.03), 7), audioRms: audio((t) => (t < 2 ? -70 : -22), 7) }), 0);
 });
