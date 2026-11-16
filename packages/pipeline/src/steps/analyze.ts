@@ -57,3 +57,32 @@ export function parseMetadata(text: string, key: string): { t: number; v: number
   }
   return out;
 }
+
+/**
+ * Dead lead-in (deep dive 2026-11-16, owner priority: swipe rate): when a clip opens still AND quiet, start it just
+ * before the first motion or sound. Conservative by design: at most `maxTrim` seconds, never inside the setup before
+ * the detected peak (`keepBeforePeak`), never leaving less than `minRemain` seconds, and nothing under `minTrim`.
+ */
+export const LEAD_IN = { window: 0.5, motion: 0.008, quietBelowMeanDb: 8, maxTrim: 3, minTrim: 0.6, preRoll: 0.25, keepBeforePeak: 1.0, minRemain: 6 } as const;
+
+export function leadInTrim(a: Pick<ClipAnalysis, 'duration' | 'sceneScores' | 'audioRms' | 'peak' | 'loudnessDb'>, o = LEAD_IN): number {
+  if (!a.sceneScores.length) return 0;
+  const horizon = Math.min(o.maxTrim + o.preRoll + o.window, a.duration);
+  // first moment with visible motion: mean scene score over a short window
+  let motionAt = horizon;
+  for (const s of a.sceneScores) {
+    if (s.t >= horizon) break;
+    const win = a.sceneScores.filter((x) => x.t >= s.t && x.t < s.t + o.window);
+    if (win.length && win.reduce((m, x) => m + x.score, 0) / win.length >= o.motion) { motionAt = s.t; break; }
+  }
+  // first moment with real sound (speech, a bark, a crash): close to the clip's mean loudness
+  let soundAt = horizon;
+  if (a.loudnessDb != null) {
+    const hit = a.audioRms.find((x) => x.t < horizon && x.db > -45 && x.db >= a.loudnessDb! - o.quietBelowMeanDb);
+    if (hit) soundAt = hit.t;
+  }
+  let trim = Math.min(motionAt, soundAt) - o.preRoll;
+  trim = Math.min(trim, o.maxTrim, a.duration - o.minRemain);
+  if (a.peak) trim = Math.min(trim, a.peak.t - o.keepBeforePeak);
+  return trim >= o.minTrim ? Math.round(trim * 100) / 100 : 0;
+}

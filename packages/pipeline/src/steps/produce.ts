@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { assessFairUse, broadcastRisk, creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
-import { analyzeClip } from './analyze.js';
+import { analyzeClip, leadInTrim } from './analyze.js';
 import { contactSheet, readWatermark, sheetBase64, sheetPathFor } from './frames.js';
 import { log, type Config } from '../config.js';
 import type { Store } from '../store.js';
 import { musicSuspect, transcribe, transcribeDetailed } from './captions.js';
 import { writeCopy } from './copy.js';
-import { downloadMedia, extractAudio, ffprobe, mediaDuration, videoPhash } from './media.js';
+import { downloadMedia, extractAudio, ffprobe, mediaDuration, run, videoPhash } from './media.js';
 import { loadTemplate, pickMusic, renderShort } from './render.js';
 import { qualityControl } from './qc.js';
 import { scoreCandidate } from './score.js';
@@ -56,8 +56,8 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     }
     await store.patchCandidate(c.id, { status: 'producing' });
 
-    const src = await withRetry(`download ${c.id}`, () => downloadMedia(c, dir), { attempts: 3, baseMs: 3000 });
-    const probe = await ffprobe(src);
+    let src = await withRetry(`download ${c.id}`, () => downloadMedia(c, dir), { attempts: 3, baseMs: 3000 });
+    let probe = await ffprobe(src);
     if (probe.duration < 3) throw new Error(`clip too short (${probe.duration.toFixed(1)}s)`);
     if (probe.duration > maxSourceSec(cfg)) {
       // No automatic sub-clipping: cutting a 2-minute clip at 59 s loses the payoff. Reddit feeds carry no duration, so this is where it shows up.
@@ -88,6 +88,16 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
       return null;
     }
     await store.patchCandidate(c.id, { phash, duration_sec: probe.duration, width: probe.width, height: probe.height });
+
+    // dead lead-in: a clip that opens still and quiet starts just before the first motion or sound (swipe rate)
+    const lead = leadInTrim(await analyzeClip(src));
+    if (lead > 0) {
+      const trimmed = path.join(dir, 'source.trimmed.mp4');
+      await run('ffmpeg', ['-y', '-v', 'error', '-ss', lead.toFixed(2), '-i', src, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '17', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', trimmed]);
+      log.info(`lead-in trimmed ${c.id}: first ${lead.toFixed(2)} s were still and quiet`);
+      src = trimmed;
+      probe = await ffprobe(src);
+    }
 
     // transcript (for captions + better copy); fine if absent
     const audio = await extractAudio(src, path.join(dir, 'audio.mp3'));
