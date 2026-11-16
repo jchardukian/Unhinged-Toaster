@@ -104,7 +104,12 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     const speech = audio ? await transcribeDetailed(cfg, audio) : null;
     // a song in the source (Content ID): mute the source audio and never caption lyrics
     const music = musicSuspect(speech);
-    if (music) log.info(`music suspected in ${c.id} (${music}): source audio will be muted`);
+    if (music) {
+      // a song-driven clip muted is a silent video (2026-11-16: a 58 s silent render passed QC): skip it instead
+      await store.patchCandidate(c.id, { status: 'rejected_quality', status_reason: `commercial song in the source (${music}); muting would leave it silent` });
+      log.info(`rejected ${c.id}: song in the source (${music})`);
+      return null;
+    }
     const transcript = music ? null : speech?.transcript ?? null;
     const speechInfo = speech && speech.wordCount > 0 ? { language: speech.language, words: speech.wordCount, excerpt: speech.text.slice(0, 300) } : null;
 
