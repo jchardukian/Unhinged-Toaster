@@ -30,7 +30,7 @@ Structure every Short as HOOK -> SETUP -> PAYOFF and keep it short:
 Banned anywhere: "Watch as", "Watch this", "Watch how", "You won't believe", "Spoiler", "takes an unexpected turn", "Things take a turn", "Wait for it" (except freeze_text), "pure chaos", "comedy gold", "epic", "hilarious".`;
 
 /** Generic AI openings that read as automated filler (enforced only with the strict hook rules). */
-export const GENERIC_COPY = /\b(watch (as|this|how|what)|you won'?t believe|spoiler( alert)?|takes? an unexpected turn|things take a turn|pure (chaos|joy|comedy)|comedy gold|epic fail|hilarious)\b/i;
+export const GENERIC_COPY = /\b(watch (as|this|how|what)|watch the \w+ unfold|\w+ unfolds?!?$|just look at|you won'?t believe|spoiler( alert)?|takes? an unexpected turn|things take a turn|pure (chaos|joy|comedy)|comedy gold|epic fail|hilarious)\b/i;
 /** Topic-label headlines (no curiosity) that underperformed in the first week of data (deep dive 2026-11-12). */
 export const LABEL_HEADLINE = /\b(in action|alert|yes,? please|mayhem|madness|shenanigans|spectacular|unleashed)\b|\b\w+ time!*$/i;
 /** Commentary that narrates the clip instead of adding the toaster's own take. */
@@ -49,6 +49,21 @@ export function repairCaption(caption: string, headline: string): string {
   return /[.!?…]$/.test(h) ? h : `${h}.`;
 }
 
+/**
+ * Deep dive 2026-11-19: comments are ~0 on every post. The caption ends with the toaster's rating and a short question
+ * that invites viewers to disagree (no like/follow asks: TikTok's FYF standards exclude engagement bait). The wording
+ * rotates per clip so posts do not repeat one template.
+ */
+export const RATING_QUESTIONS = ['Fair, or way too generous?', 'Your score?', 'Too harsh?', 'Would you go higher?', 'What would you give it?', 'Agree or nah?'];
+export function withRatingQuestion<T extends CopyResult>(c: T): T {
+  if (!c.rating || !c.rating_label || /toaster rating/i.test(c.caption)) return c;
+  let h = 0;
+  for (const ch of c.headline) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const q = RATING_QUESTIONS[h % RATING_QUESTIONS.length];
+  const base = c.caption.trim().replace(/[\s]+$/, '');
+  return { ...c, caption: `${base}${base && !/[.!?…]$/.test(base) ? '.' : ''} Toaster rating: ${c.rating}/10 ${c.rating_label.toLowerCase()}. ${q}`.trim() };
+}
+
 export function strictHooksOn(): boolean { return process.env.COPY_STRICT_HOOKS !== 'false' && process.env.TEMPLATE_VARIANT?.trim() !== 'classic'; }
 
 export async function writeCopy(cfg: Config, c: Candidate, transcript?: string | null, framesJpegBase64?: string): Promise<CopyResult> {
@@ -59,12 +74,12 @@ export async function writeCopy(cfg: Config, c: Candidate, transcript?: string |
       original_title: c.title, description: c.description, visual_summary: c.visual_summary ?? null, category: c.category, duration_sec: c.duration_sec, transcript: transcript?.slice(0, 800) ?? null,
     }), { temperature: 0.9, maxTokens: 400, imageJpegBase64: framesJpegBase64 });
     const out = validate(r, { strictHooks: strict });
-    if (out) return out;
+    if (out) return withRatingQuestion(out);
     log.warn(`copy failed validation for ${c.id} (empty, slur, British, or generic opener), retrying once with the clip context`);
     const r2 = await chatJson<CopyResult>(cfg, system + '\nYour previous attempt was rejected (empty, offensive, not natural American English, a generic opener like "Watch as", a topic-label headline like "LLAMA ZOOMIES IN ACTION!", or commentary that narrates the clip). Keep it clean, American and specific: a suspense hook headline that does not give the outcome away, and a toaster verdict or joke the viewer cannot see for themselves.', JSON.stringify({ original_title: c.title, visual_summary: c.visual_summary ?? null, category: c.category, transcript: transcript?.slice(0, 400) ?? null }), { temperature: 0.6, maxTokens: 350, imageJpegBase64: framesJpegBase64 });
     // a still-generic retry beats the per-category fallback (which is unrelated to the clip), so the retry is judged without the hook rule
     const out2 = validate(r2, { strictHooks: strict }) ?? (strict ? validate(r2) : null);
-    if (out2) return strict ? { ...out2, caption: repairCaption(out2.caption, out2.headline) } : out2;
+    if (out2) return withRatingQuestion(strict ? { ...out2, caption: repairCaption(out2.caption, out2.headline) } : out2);
   } catch (e) {
     log.warn(`copywriter LLM failed for ${c.id}: ${(e as Error).message}`);
   }

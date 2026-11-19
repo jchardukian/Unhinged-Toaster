@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { buildAss, assColor, isHallucination, maskProfanity, musicSuspect, muteWindows } from '../src/steps/captions.js';
 import { isCreatorHandle } from '../src/steps/frames.js';
-import { validate, fallback, strictHooksOn, repairCaption, ratingOf, LABEL_HEADLINE, NARRATION_COMMENTARY } from '../src/steps/copy.js';
+import { validate, fallback, strictHooksOn, repairCaption, ratingOf, withRatingQuestion, RATING_QUESTIONS, LABEL_HEADLINE, NARRATION_COMMENTARY } from '../src/steps/copy.js';
 import { fmtCount, isoDurationSec, latinRatio, parseRedditCandidate, viewsPerHour, youtubeFetchGuard, ytMetaFromApi, ytViralBucket } from '../src/steps/discover.js';
 import { ytdlpCommonArgs } from '../src/steps/media.js';
 import { postText } from '../src/steps/publish.js';
@@ -337,4 +337,22 @@ test('leadInTrim: trims a still, quiet opening; never cuts setup, motion-from-fr
   assert.equal(leadInTrim({ ...base, peak: { t: 1.5, method: 'x' }, sceneScores: frames((t) => (t < 2 ? 0.001 : 0.03)), audioRms: audio((t) => (t < 2 ? -70 : -22)) }), 0);
   // short clip keeps at least 6 s
   assert.equal(leadInTrim({ ...base, duration: 6.5, peak: null, sceneScores: frames((t) => (t < 2 ? 0.001 : 0.03), 7), audioRms: audio((t) => (t < 2 ? -70 : -22), 7) }), 0);
+});
+
+test('caption ends with the toaster rating and a rotating question (no like/follow bait)', () => {
+  const c = { headline: 'HE THINKS THE LEAVES ARE SOFT', commentary: 'x', caption: 'He committed. The leaves did not', hashtags: ['funny'], rating: 9, rating_label: 'COMMITMENT' };
+  const out = withRatingQuestion(c);
+  assert.match(out.caption, /^He committed\. The leaves did not\. Toaster rating: 9\/10 commitment\. /);
+  assert.ok(RATING_QUESTIONS.some((q) => out.caption.endsWith(q)));
+  assert.ok(!/\b(like|follow|subscribe)\b/i.test(RATING_QUESTIONS.join(' ')));
+  assert.equal(withRatingQuestion(out).caption, out.caption, 'idempotent');
+  assert.equal(withRatingQuestion({ ...c, rating: undefined }).caption, c.caption, 'no rating, no question');
+  const qs = new Set(['A', 'B HEADLINE', 'CAT VS GRAVITY', 'DOG DOES A THING', 'X Y Z'].map((h) => withRatingQuestion({ ...c, headline: h }).caption.split('. ').pop()));
+  assert.ok(qs.size > 1, 'wording rotates');
+});
+
+test('generic copy filter also catches "watch the chaos unfold" and "just look at"', () => {
+  const ok = { headline: "THE TOY WASN'T READY FOR THIS", commentary: "I've burned toast with more commitment than that jump.", caption: 'He committed.', hashtags: ['funny'] };
+  assert.equal(validate({ ...ok, caption: 'When your plan meets reality! Watch the chaos unfold.' }, { strictHooks: true }), null);
+  assert.equal(validate({ ...ok, caption: 'Just look at this little cutie!' }, { strictHooks: true }), null);
 });
