@@ -74,12 +74,23 @@ export async function runPreflight(cfg: Config, mode: PreflightMode, deps: { fet
     const r = await get('https://api.elevenlabs.io/v1/voices', { headers });
     add('ElevenLabs voices', r.ok, false, r.ok ? `voices list -> 200${cfg.elevenVoiceId ? `, voice pinned` : ', first energetic voice will be auto-picked'}` : `-> ${r.status}`);
   } catch (e) { add('ElevenLabs voices', false, false, (e as Error).message.slice(0, 120)); }
-  try {
-    const r = await get('https://www.reddit.com/r/AnimalsBeingDerps/top/.rss?t=day&limit=3', { headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36', accept: 'application/atom+xml' } });
-    const xml = r.ok ? await r.text() : '';
-    // 429 is Reddit's per-IP rate limit, which the discovery adapter retries with 15/30 s back-off: a warning, not a block
-    add('Reddit feed', r.ok && xml.includes('<entry>'), r.status !== 429, r.ok ? `top-of-day feed -> ${xml.includes('<entry>') ? 'entries present' : 'no entries'}` : `-> ${r.status}${r.status === 429 ? ' (rate limited right now; runs retry with back-off)' : ''}`);
-  } catch (e) { add('Reddit feed', false, true, (e as Error).message.slice(0, 120)); }
+  // Reddit is the discovery source, not a dependency of the run: production uses the scored backlog and publishing
+  // needs no Reddit at all. Several subreddits are tried (one going private/404 must not stop the channel, as on
+  // 2026-11-17..19) and any outcome is a warning, never a block.
+  {
+    const results: string[] = [];
+    let any = false;
+    for (const sub of ['AnimalsBeingDerps', 'funny', 'Unexpected']) {
+      try {
+        const r = await get(`https://www.reddit.com/r/${sub}/top/.rss?t=day&limit=3`, { headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36', accept: 'application/atom+xml' } });
+        const xml = r.ok ? await r.text() : '';
+        const ok = r.ok && xml.includes('<entry>');
+        results.push(`r/${sub} -> ${r.status}${r.ok && !ok ? ' (no entries)' : ''}`);
+        if (ok) { any = true; break; }
+      } catch (e) { results.push(`r/${sub} -> ${(e as Error).message.slice(0, 60)}`); }
+    }
+    add('Reddit feed', any, false, `${results.join('; ')}${any ? '' : ' (discovery may find nothing new today; production continues from the scored backlog)'}`);
+  }
 
   const ok = checks.every((c) => c.ok || !c.essential);
   const tripped = breakerState();
