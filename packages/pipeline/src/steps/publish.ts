@@ -1,4 +1,4 @@
-import { AUTOPILOT_AUTHORIZATION_PHRASE, BufferApiError, BufferClient, buildWeekPlan, creditText, hasReviewBlock, toBufferDueAt, ulid, unattendedEligible, type BufferService, type Candidate, type Production, type ScheduledPost, type SlotPlan } from '@toaster/shared';
+import { AUTOPILOT_AUTHORIZATION_PHRASE, BufferApiError, outOfSeason, BufferClient, buildWeekPlan, creditText, hasReviewBlock, toBufferDueAt, ulid, unattendedEligible, type BufferService, type Candidate, type Production, type ScheduledPost, type SlotPlan } from '@toaster/shared';
 import { log, type Config } from '../config.js';
 import { isTransient, withRetry } from '../retry.js';
 import type { Store } from '../store.js';
@@ -96,7 +96,8 @@ export async function publishWeek(cfg: Config, store: Store, opts: PublishOption
     const kept: Production[] = [];
     for (const p of pool) {
       const cand = await store.getCandidate(p.candidate_id);
-      const elig = cand ? unattendedEligible(cand, p, opts.unattended.minQc, { fairUse: opts.unattended.fairUse }) : { eligible: false, reasons: ['candidate record missing'] };
+      const season = cand ? outOfSeason(`${cand.title}\n${p.headline}\n${cand.visual_summary ?? ''}`, now()) : null;
+      const elig = season ? { eligible: false, reasons: [`out of season (${season})`] } : cand ? unattendedEligible(cand, p, opts.unattended.minQc, { fairUse: opts.unattended.fairUse }) : { eligible: false, reasons: ['candidate record missing'] };
       if (elig.eligible) { kept.push(p); continue; }
       await opts.unattended.decide({ kind: 'skip', production_id: p.id, candidate_id: p.candidate_id, service: null, slot_at: null, buffer_post_id: null, reasons: JSON.stringify(elig.reasons), detail: JSON.stringify({ headline: p.headline }) });
       result.skipped++;
