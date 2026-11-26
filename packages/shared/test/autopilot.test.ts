@@ -90,3 +90,18 @@ test('unattended eligibility with the fair-use policy: supportable assessments q
   assert.equal(unattendedEligible(review, { ...prod, fair_use_json: supportable, qc_score: 5 }, 7, { fairUse: true }).eligible, false, 'QC still applies');
   assert.equal(unattendedEligible({ ...review, rights_status: 'unknown' }, { ...prod, fair_use_json: supportable }, 7, { fairUse: true }).eligible, false, 'only transformation-review candidates');
 });
+
+test('outOfSeason: holiday clips only in their season; broadcastRisk catches championships and licensed wildlife', async () => {
+  const { outOfSeason, broadcastRisk } = await import('../src/index.js');
+  const dec2 = new Date('2026-12-02T18:00:00Z'), oct20 = new Date('2026-10-20T18:00:00Z'), nov25 = new Date('2026-11-25T18:00:00Z');
+  assert.equal(outOfSeason('Skeleton on stilts for Halloween', dec2), 'halloween');
+  assert.equal(outOfSeason('Skeleton on stilts for Halloween', oct20), null);
+  assert.equal(outOfSeason('Dog meets Santa at the mall', oct20), 'christmas');
+  assert.equal(outOfSeason('Dog meets Santa at the mall', dec2), null);
+  assert.equal(outOfSeason('Thanksgiving turkey heist', nov25), null);
+  assert.equal(outOfSeason('Thanksgiving turkey heist', dec2), 'thanksgiving');
+  assert.equal(outOfSeason('Dog steals pumpkin guts', dec2), null, 'pumpkins alone are not a holiday');
+  assert.ok(broadcastRisk('Kaden Brown does perfect tumble landing at World Championships').high);
+  assert.ok(broadcastRisk('Perfect mid air ambush by a leopard, Kruger').high);
+  assert.ok(!broadcastRisk('My dog does a perfect tumble off the couch').high);
+});

@@ -51,7 +51,25 @@ const BROADCAST = [
   /\b(talk show|late show|late night|tonight show|snl|saturday night live|game show|sitcom|episode \d+|season \d+)\b/i,
   /\b(podium|post-?match|post-?game|halftime|commentator|play-by-play)\b/i,
   /\b(trailer|official video|music video|concert footage)\b/i,
+  // deep dive 2026-11-26: competition footage and licensed wildlife/nature footage reached the queue
+  /\b(world championships?|national championships?|nationals|grand final|tournament final|world record attempt at)\b/i,
+  /\b(kruger|latest ?sightings|nat ?geo|national geographic|bbc earth|discovery channel|animal planet)\b/i,
 ];
+/**
+ * Holiday clips posted out of season look stale (deep dive 2026-11-26: Halloween costumes queued for December).
+ * Returns the holiday when `text` is about one whose season does not include `now` (America/Chicago calendar date).
+ */
+export function outOfSeason(text: string, now: Date = new Date()): string | null {
+  const md = Number(now.toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'numeric' })) * 100 + Number(now.toLocaleString('en-US', { timeZone: 'America/Chicago', day: 'numeric' }));
+  const seasons: { name: string; re: RegExp; from: number; to: number }[] = [
+    { name: 'halloween', re: /\b(hallowe+n|trick[- ]or[- ]treat\w*|jack[- ]o[- ]lanterns?)\b/i, from: 1001, to: 1107 },
+    { name: 'thanksgiving', re: /\bthanksgiving\b/i, from: 1101, to: 1130 },
+    { name: 'christmas', re: /\b(christmas|xmas|santa claus|santa)\b/i, from: 1120, to: 1231 },
+  ];
+  for (const s of seasons) if (s.re.test(text) && (md < s.from || md > s.to)) return s.name;
+  return null;
+}
+
 export function broadcastRisk(text: string): { high: boolean; reasons: string[] } {
   const reasons = BROADCAST.filter((re) => re.test(text)).map((re) => `broadcast:${re.source.slice(0, 40)}`);
   return { high: reasons.length > 0, reasons };

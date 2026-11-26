@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { assessFairUse, broadcastRisk, creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
+import { assessFairUse, broadcastRisk, outOfSeason, creditText, findDuplicate, planEdit, productionBasis, qualityTier, ulid, type Candidate, type CommentaryMode, type Production, type RightsPolicy } from '@toaster/shared';
 import { analyzeClip, leadInTrim } from './analyze.js';
 import { contactSheet, readWatermark, sheetBase64, sheetPathFor } from './frames.js';
 import { log, type Config } from '../config.js';
@@ -52,6 +52,12 @@ async function produceCandidateInner(cfg: Config, store: Store, cIn: Candidate, 
     const basis = productionBasis(c, rightsPolicy(cfg));
     if (!basis) {
       await store.patchCandidate(c.id, { status: 'blocked_rights', status_reason: `rights ${c.rights_status}/${c.rights_basis ?? 'none'}${c.copyright_risk ? ` risk ${c.copyright_risk}` : ''}` });
+      return null;
+    }
+    const season = outOfSeason(`${c.title}\n${c.description ?? ''}\n${c.visual_summary ?? ''}`);
+    if (season) {
+      await store.patchCandidate(c.id, { status: 'rejected_quality', status_reason: `out of season (${season})` });
+      log.info(`rejected ${c.id}: ${season} clip out of season`);
       return null;
     }
     await store.patchCandidate(c.id, { status: 'producing' });
